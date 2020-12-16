@@ -8,6 +8,7 @@ from typing import Tuple, List
 from os.path import join as join_path
 
 import numpy as onp
+import random
 
 import haiku as hk
 import jax
@@ -265,6 +266,9 @@ class DQNAgent:
         self.train_step = 0
         self.update_q = DQNLearning.update_q
 
+        self.learning_rate = self.params.learning_rate
+        self.buffersize = self.params.experience_buffer_size
+
         if params.use_priority:
             self.experience = PriorityBuffer(
                 observation_spec.shape[1] * self.params.history_size,
@@ -296,6 +300,7 @@ class DQNAgent:
             observations, legal_actions)
         return jax.tree_util.tree_map(onp.array, actions)
     
+    # deprecated with new implementation for stacking
     def add_experience_first(self, observations, step_types):
         pass
 
@@ -382,3 +387,37 @@ class DQNAgent:
             self.online_params = pickle.load(iwf)
         with open(trg_weights_file, 'rb') as iwf:
             self.trg_params = pickle.load(iwf)
+
+    """Functions necessary for PBT"""
+
+    def get_agent_attributes(self):
+        """Retrieves network weights, to copy them over to other models"""
+        # network_weights = self.online_params
+        attributes = (self.learning_rate, self.buffersize, self.online_params)
+        return attributes
+
+    def overwrite_weights(self, network_weights):
+        """Overwrites this model's network weights with those taken from another model in the Population"""
+        self.online_params = network_weights
+        self.trg_params = network_weights
+
+    def overwrite_lr(self, lr_factor, lr_survivor):
+        """Resets the optimizer with altered learning rate"""
+        self.learning_rate = lr_survivor * (1 + (random.randint(0,1) * 2 - 1) * lr_factor)
+        # self.params._replace(learning_rate = new_lr)
+        self.optimizer = optax.adam(self.learning_rate, eps=3.125e-5)
+        self.opt_state = self.optimizer.init(self.online_params)
+
+    def change_buffersize(self, buffer_factor, buffersize_survivor):
+        """Alters the size of the current model's buffer_size randomly by buffer_factor up/down"""
+        if self.buffersize <= 512:
+            choices = [buffer_factor, 1]
+        elif self.buffersize >= 2**15:
+            choices = [1, 1 / buffer_factor]
+        else:
+            choices = [buffer_factor, 1/buffer_factor]
+        self.buffersize = int(buffersize_survivor * random.choice(choices))
+
+        self.experience.change_size(self.buffersize)
+
+        #TODO: implement for priority replay

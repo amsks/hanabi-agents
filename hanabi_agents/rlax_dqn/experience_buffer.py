@@ -95,3 +95,58 @@ class ExperienceBuffer:
         """
         indices = np.random.choice(self._sample_range[:self.size], size=batch_size)
         return self[indices]
+
+    # Functions necessary for PBT
+
+    def change_size(self, new_size):
+        '''Changes the buffersize of an agent by copying the respective most recent observations'''
+        new_size = int(new_size)
+        buffer_arrays = ['_obs_tm1_buf', '_act_tm1_buf', '_obs_t_buf', '_lms_t_buf', '_rew_t_buf', '_terminal_t_buf']
+
+        def make_intermediate(size_a, size_b, type):
+            return np.empty((size_a, size_b), dtype=type)
+
+        def fill_intermediate(new_size, intermed_arr, orig_arr):
+            # buffer being extended
+            if self.capacity < new_size:
+                # buffer full
+                if self.size == self.capacity:
+                    intermed_arr[:(self.capacity - self.oldest_entry), :] = orig_arr[self.oldest_entry:, :]
+                    intermed_arr[(self.capacity - self.oldest_entry):self.capacity, :] = orig_arr[:self.oldest_entry, :]
+                    self.oldest_entry = self.size
+                # buffer not filled yet
+                else:
+                    intermed_arr[:self.oldest_entry, :] = orig_arr[:self.oldest_entry, :]
+            # buffer being shrinked
+            else:
+                # buffer full
+                if self.size == self.capacity:
+                    # buffer-tail can be copied unfragmented
+                    if self.oldest_entry >= new_size:
+                        intermed_arr[:, :] = orig_arr[(self.oldest_entry - new_size):self.oldest_entry, :]
+                    # most recent buffer entries are fragmented between bufferend and beginning
+                    else:
+                        intermed_arr[:(new_size - self.oldest_entry), :] = orig_arr[-(new_size - self.oldest_entry), :]
+                        intermed_arr[(new_size - self.oldest_entry):, :] = orig_arr[:self.oldest_entry, :]
+                    self.size = new_size
+                    self.oldest_entry = new_size
+                # buffer not yet full
+                else:
+                    if self.oldest_entry >= new_size:
+                        intermed_arr[:, :] = orig_arr[(self.oldest_entry - new_size):self.oldest_entry, :]
+                        self.oldest_entry = new_size
+                    else:
+                        intermed_arr[:self.oldest_entry, :] = orig_arr[:self.oldest_entry, :]
+
+            return intermed_arr
+
+        #change the size of each bufferarray one by one
+        for i, attr in enumerate(buffer_arrays):
+            intermediate_array = make_intermediate(new_size, getattr(self, attr).shape[1], getattr(self, attr).dtype)
+            setattr(self, attr, np.copy(fill_intermediate(new_size, intermediate_array, getattr(self, attr))))
+
+        del intermediate_array
+
+        self._sample_range = np.arange(0, new_size, dtype=np.int)
+        self.capacity = new_size
+

@@ -19,7 +19,6 @@ class RewardShaper:
         self.unshaped = (0, ShapingType.NONE)
 
     def shape(self, observations, moves):
-        
         assert len(observations) == len(moves)
 
         if self.num_ranks == None:
