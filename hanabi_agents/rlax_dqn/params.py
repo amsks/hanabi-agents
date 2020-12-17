@@ -52,6 +52,6 @@ class PBTParams(NamedTuple):
     buffersize_start_factor: int = 4
     buffersize_factor: int = 2
     individual_reward_shaping: bool = False
-    life_span int = 150
+    life_span: int = 150
 
 
