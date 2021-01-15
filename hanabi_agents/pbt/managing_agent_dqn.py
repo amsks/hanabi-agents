@@ -11,7 +11,7 @@ from typing import Tuple, Dict, List, Union
 import random
 import os
 from dm_env import TimeStep, StepType
-# import ray
+import ray
 import pickle
 
 """
@@ -79,6 +79,8 @@ class AgentDQNPopulation:
         self.states_done = np.full((self.n_states,), False)
         self.states_reset = np.full((self.n_states,), False)
         self.evaluations = np.zeros((self.n_states,))
+        self.prev_reward = np.zeros(self.pop_size)
+        self.pbt_counter = np.zeros(0)
 
         # Make rewardshaping object as list/single objective for general/individual shaping
         if self.pbt_params.individual_reward_shaping:
@@ -138,15 +140,20 @@ class AgentDQNPopulation:
             return random.uniform(min_lr, max_lr)
 
         agent_configs = []
+        # Rem_Agent = ray.remote(DQNAgent)
         for j in range(self.pop_size):
             custom_params = self.agent_params
             custom_params = custom_params._replace(learning_rate = sample_init_lr())
             custom_params = custom_params._replace(experience_buffer_size = sample_buffersize())
-            agent = DQNAgent(self.env_obs_size,
-                             self.env_act_size,
-                             custom_params)
+
+            agent = DQNAgent.remote(self.env_obs_size,
+                                    self.env_act_size,
+                                    custom_params)
+            # agent = DQNAgent(self.env_obs_size,
+            #                  self.env_act_size,
+            #                  custom_params)
             self.agents.append(agent)
-        agents_status(self.agents)
+        # agents_status(self.agents)
 
         self.evo_steps = 0
 
@@ -154,12 +161,17 @@ class AgentDQNPopulation:
     def explore(self, observations):
         """Explore functionality: Breaks env_obs in chunks of obs_chunk_size and passes it to respective sub-agents """
         # TODO: concatenate HanabiMoveVectors / slicing HanabiObservationVector
+        self.pbt_counter += 1
         action_chunks = []
         for i, agent in enumerate(self.agents):
             obs_chunk = (observations, (observations[1][0][i * self.obs_chunk_size : (i + 1) * self.obs_chunk_size],
                          observations[1][1][i * self.obs_chunk_size : (i + 1) * self.obs_chunk_size]))
-            action_chunks.append(agent.explore(obs_chunk))
-        actions = np.concatenate(action_chunks, axis = 0)
+
+            actions_rem = agent.explore.remote(obs_chunk)             
+            action_chunks.append(actions_rem)
+
+
+        actions = np.concatenate(ray.get(action_chunks), axis = 0)
         return actions
 
 
@@ -170,8 +182,12 @@ class AgentDQNPopulation:
         for i, agent in enumerate(self.agents):
             obs_chunk = (observations, (observations[1][0][i * chunk_size : (i + 1) * chunk_size],
                          observations[1][1][i * chunk_size : (i + 1) * chunk_size]))
-            action_chunks.append(agent.exploit(obs_chunk))
-        actions = np.concatenate(action_chunks, axis = 0)
+            actions_rem = agent.exploit.remote(obs_chunk)
+
+            action_chunks.append(actions_rem)
+        # print(ray.get(action_chunks))
+        # actions_rem = ray.get(actions_rem)
+        actions = np.concatenate(ray.get(action_chunks), axis = 0)
         return actions
 
     # deprecated with new implementation for stacking
@@ -191,7 +207,7 @@ class AgentDQNPopulation:
             reward_chunk = rewards[i * self.obs_chunk_size: (i + 1) * self.obs_chunk_size]
             step_chunk = step_types[i * self.obs_chunk_size: (i + 1) * self.obs_chunk_size]
 
-            agent.add_experience(obs_tm1_chunk, action_chunk, reward_chunk, obs_chunk, step_chunk)
+            agent.add_experience.remote(obs_tm1_chunk, action_chunk, reward_chunk, obs_chunk, step_chunk)
 
     def shape_rewards(self, observations, moves):
     
@@ -221,26 +237,29 @@ class AgentDQNPopulation:
     def update(self):
         '''Train the agent's policy'''
         for agent in self.agents:
-            agent.update()
+            agent.update.remote()
 
 
     def requires_vectorized_observation(self):
         return True
 
 
-    def save_weights(self, path):
+    def save_weights(self, path, mean_reward):
         """saves the weights of all agents to the respective directories"""
         for i, agent in enumerate(self.agents):
-            agent.save_weights(os.path.join(path, "agent_" + str(i)), "ckpt_" + str(agent.train_step))
+            if self.prev_reward[i] < mean_reward[i]:
+                agent.save_weights.remote(os.path.join(path, "agent_" + str(i)), "ckpt_" + str(agent.train_step))
+        self.prev_reward = mean_reward
 
 
-
-    def survival_fittest(self, index_survivors, index_losers):
+    def pbt_eval(self, mean_reward):
         """Copies the network weights from those agents considered survivors over to those not considered and samples new
             parameters for those overwritten (learning rate / buffersize)"""
+        self.readiness = self.pbt_counter >= self.pbt_params.life_span
+
+        index_survivor, index_losers = _choose_fittest(mean_reward)
 
         survivor_attributes = []
-        print('survivor_attributes is ', len(survivor_attributes))
         for survivor in index_survivors:
             survivor_attributes.append(self.agents[survivor].get_agent_attributes())
         for loser in index_losers:
@@ -248,5 +267,16 @@ class AgentDQNPopulation:
             self.agents[loser].overwrite_weights(winner[2])
             self.agents[loser].overwrite_lr(self.pbt_params.lr_factor, winner[0])
             self.agents[loser].change_buffersize(self.pbt_params.buffersize_factor, winner[1])
-        agents_status(self.agents)
+            self.pbt_counter[loser] = 0
+        # agents_status(self.agents)
 
+    def save_pbt_log(self):
+        pass
+
+    def _choose_fittest(self, mean_reward):
+        """Chosses the fittest agents after evaluation run and overwrites all the other agents with weights + permutation of lr + buffersize"""
+        rdy_agents = np.sum(self.readiness)
+        no_fittest = rdy_agents - int(rdy_agents * self.pbt_params.discard_percent)
+        index_loser = np.argpartition(-mean_reward[self.readiness], no_fittest)[no_fittest:]
+        index_survivor = np.argpartition(-mean_reward[self.readiness], no_fittest)[:no_fittest]
+        return index_survivor, index_loser

@@ -16,6 +16,7 @@ import optax
 import jax.numpy as jnp
 import rlax
 import chex
+import ray
 
 from .experience_buffer import ExperienceBuffer
 from .priority_buffer import PriorityBuffer
@@ -220,7 +221,7 @@ class DQNLearning:
         online_params_t = optax.apply_updates(online_params, updates)
         return online_params_t, opt_state_t, new_prios
 
-
+@ray.remote(num_gpus = 0.2)
 class DQNAgent:
     def __init__(
             self,
