@@ -13,6 +13,7 @@ import os
 from dm_env import TimeStep, StepType
 import ray
 import pickle
+import time
 
 """
 ### Work in Progress###
@@ -72,6 +73,7 @@ class AgentDQNPopulation:
         self.env_obs_size = observation_spec_vec_batch(env_obs_size, int(self.pop_size))[0]
 
         self.pop_size = self.pbt_params.population_size
+        print('!!!!!!!!!!!!!!!!!!!', self.pop_size)
 
         assert (self.n_states % self.pop_size) == 0, \
             "number of states must be a multiple of population size"
@@ -140,13 +142,13 @@ class AgentDQNPopulation:
             return random.uniform(min_lr, max_lr)
 
         agent_configs = []
-        # Rem_Agent = ray.remote(DQNAgent)
+
         for j in range(self.pop_size):
             custom_params = self.agent_params
             custom_params = custom_params._replace(learning_rate = sample_init_lr())
             custom_params = custom_params._replace(experience_buffer_size = sample_buffersize())
 
-            agent = DQNAgent.remote(self.env_obs_size,
+            agent = DQNAgent(self.env_obs_size,
                                     self.env_act_size,
                                     custom_params)
             # agent = DQNAgent(self.env_obs_size,
@@ -156,22 +158,30 @@ class AgentDQNPopulation:
         # agents_status(self.agents)
 
         self.evo_steps = 0
-
+        print('No of agents in this', len(self.agents))
 
     def explore(self, observations):
         """Explore functionality: Breaks env_obs in chunks of obs_chunk_size and passes it to respective sub-agents """
         # TODO: concatenate HanabiMoveVectors / slicing HanabiObservationVector
         self.pbt_counter += 1
         action_chunks = []
+        # start_time = time.time()
+        # for_time = 0 
         for i, agent in enumerate(self.agents):
+            # for_time_0 = time.time()
             obs_chunk = (observations, (observations[1][0][i * self.obs_chunk_size : (i + 1) * self.obs_chunk_size],
                          observations[1][1][i * self.obs_chunk_size : (i + 1) * self.obs_chunk_size]))
+            # for_time += (time.time()-for_time_0)
 
-            actions_rem = agent.explore.remote(obs_chunk)             
+            actions_rem = agent.explore(obs_chunk)             
             action_chunks.append(actions_rem)
+            # print('part', i)
+        # ray.wait(action_chunks, self.pop_size)
 
-
-        actions = np.concatenate(ray.get(action_chunks), axis = 0)
+        # actions = np.concatenate(ray.get(action_chunks), axis = 0)
+        actions = np.concatenate(action_chunks, axis = 0)
+        # print('explore took {} seconds'.format(time.time()-start_time))
+        # print('for_time took {} seconds'.format(for_time))
         return actions
 
 
@@ -179,15 +189,25 @@ class AgentDQNPopulation:
         """Breaks env_obs in chunks of obs_chunk_size and passes it to respective sub-agents"""
         chunk_size = int(len(observations[0])/self.pop_size)
         action_chunks = []
+        # start_time = time.time()
+        # for_time = 0
         for i, agent in enumerate(self.agents):
+            
             obs_chunk = (observations, (observations[1][0][i * chunk_size : (i + 1) * chunk_size],
                          observations[1][1][i * chunk_size : (i + 1) * chunk_size]))
-            actions_rem = agent.exploit.remote(obs_chunk)
-
+            
+            # for_time_0 = time.time()
+            actions_rem = agent.exploit(obs_chunk)
+            # for_time += (time.time()-for_time_0)
             action_chunks.append(actions_rem)
         # print(ray.get(action_chunks))
         # actions_rem = ray.get(actions_rem)
-        actions = np.concatenate(ray.get(action_chunks), axis = 0)
+        # ray.wait(action_chunks, self.pop_size)
+        # actions = np.concatenate(ray.get(action_chunks), axis = 0)
+        actions = np.concatenate(action_chunks, axis = 0)
+        # print('exploit took {} seconds'.format(time.time()-start_time))
+        # print('for_time took {} seconds'.format(for_time))
+
         return actions
 
     # deprecated with new implementation for stacking
@@ -198,6 +218,7 @@ class AgentDQNPopulation:
 
     def add_experience(self, obersvation_tm1, actions, rewards, observations, step_types):
         '''Breaks input into chunks and adds them to experience buffer'''
+        # start_time = time.time()
         for i, agent in enumerate(self.agents):
             obs_tm1_chunk = (obersvation_tm1, (obersvation_tm1[1][0][i * self.obs_chunk_size: (i + 1) * self.obs_chunk_size],
                                         obersvation_tm1[1][1][i * self.obs_chunk_size: (i + 1) * self.obs_chunk_size]))
@@ -207,7 +228,9 @@ class AgentDQNPopulation:
             reward_chunk = rewards[i * self.obs_chunk_size: (i + 1) * self.obs_chunk_size]
             step_chunk = step_types[i * self.obs_chunk_size: (i + 1) * self.obs_chunk_size]
 
-            agent.add_experience.remote(obs_tm1_chunk, action_chunk, reward_chunk, obs_chunk, step_chunk)
+            agent.add_experience(obs_tm1_chunk, action_chunk, reward_chunk, obs_chunk, step_chunk)
+        # print('add_exp took {} seconds'.format(time.time()-start_time))
+
 
     def shape_rewards(self, observations, moves):
     
@@ -236,9 +259,13 @@ class AgentDQNPopulation:
 
     def update(self):
         '''Train the agent's policy'''
+        # start_time = time.time()
+        # updates = []
         for agent in self.agents:
-            agent.update.remote()
-
+            agent.update()
+            # updates.append(agent.update.remote(0))
+        # ray.wait(updates, self.pop_size)
+        # print('update took {} seconds'.format(time.time()-start_time))
 
     def requires_vectorized_observation(self):
         return True
@@ -248,19 +275,26 @@ class AgentDQNPopulation:
         """saves the weights of all agents to the respective directories"""
         for i, agent in enumerate(self.agents):
             if self.prev_reward[i] < mean_reward[i]:
-                agent.save_weights.remote(os.path.join(path, "agent_" + str(i)), "ckpt_" + str(agent.train_step))
+                agent.save_weights(os.path.join(path, "agent_" + str(i)), "ckpt_" + str(agent.train_step))
         self.prev_reward = mean_reward
-
+    
+    def _choose_fittest(self, mean_reward):
+        """Chosses the fittest agents after evaluation run and overwrites all the other agents with weights + permutation of lr + buffersize"""
+        rdy_agents = np.sum(self.readiness)
+        no_fittest = rdy_agents - int(rdy_agents * self.pbt_params.discard_percent)
+        index_loser = np.argpartition(-mean_reward[self.readiness], no_fittest)[no_fittest:]
+        index_survivor = np.argpartition(-mean_reward[self.readiness], no_fittest)[:no_fittest]
+        return index_survivor, index_loser
 
     def pbt_eval(self, mean_reward):
         """Copies the network weights from those agents considered survivors over to those not considered and samples new
             parameters for those overwritten (learning rate / buffersize)"""
         self.readiness = self.pbt_counter >= self.pbt_params.life_span
 
-        index_survivor, index_losers = _choose_fittest(mean_reward)
+        index_survivor, index_losers = self._choose_fittest(mean_reward)
 
         survivor_attributes = []
-        for survivor in index_survivors:
+        for survivor in index_survivor:
             survivor_attributes.append(self.agents[survivor].get_agent_attributes())
         for loser in index_losers:
             winner = random.choice(survivor_attributes)
@@ -273,10 +307,33 @@ class AgentDQNPopulation:
     def save_pbt_log(self):
         pass
 
-    def _choose_fittest(self, mean_reward):
-        """Chosses the fittest agents after evaluation run and overwrites all the other agents with weights + permutation of lr + buffersize"""
-        rdy_agents = np.sum(self.readiness)
-        no_fittest = rdy_agents - int(rdy_agents * self.pbt_params.discard_percent)
-        index_loser = np.argpartition(-mean_reward[self.readiness], no_fittest)[no_fittest:]
-        index_survivor = np.argpartition(-mean_reward[self.readiness], no_fittest)[:no_fittest]
-        return index_survivor, index_loser
+
+    def save_characteristics(self):
+        online_weights = []
+        trg_weights = []
+        opt_states = []
+        experience = []
+        parameters = [[],[]]
+        for agent in self.agents:
+            online_weights.append(agent.online_params)
+            trg_weights.append(agent.trg_params)
+            opt_states.append(agent.opt_state)
+            experience.append(agent.experience)
+            print(agent.learning_rate)
+            parameters[0].append(float(agent.learning_rate))
+            parameters[1].append(int(agent.buffersize))
+        return {'online_weights' : online_weights, 'trg_weights' : trg_weights,
+                'opt_states' : opt_states, 'experience' : experience, 'parameters' : parameters}
+    
+    def restore_characteristics(self, characteristics):
+        for i, agent in enumerate(self.agents):
+
+            agent.online_params = characteristics['online_weights'][i][0]
+            agent.trg_params = characteristics['trg_weights'][i][0]
+            agent.opt_state = characteristics['opt_states'][i]
+            # print(agent.opt_state)
+            agent.experience = characteristics['experience'][i]
+            
+            agent.learning_rate = characteristics['parameters'][0][i][0]
+            print(agent.learning_rate)
+            agent.buffersize = characteristics['parameters'][1][i][0]

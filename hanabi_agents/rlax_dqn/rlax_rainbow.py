@@ -17,6 +17,7 @@ import jax.numpy as jnp
 import rlax
 import chex
 import ray
+import time
 
 from .experience_buffer import ExperienceBuffer
 from .priority_buffer import PriorityBuffer
@@ -221,7 +222,7 @@ class DQNLearning:
         online_params_t = optax.apply_updates(online_params, updates)
         return online_params_t, opt_state_t, new_prios
 
-@ray.remote(num_gpus = 0.2)
+# @ray.remote(num_gpus = 0.2, num_cpus = 1)
 class DQNAgent:
     def __init__(
             self,
@@ -287,18 +288,22 @@ class DQNAgent:
         self.requires_vectorized_observation = lambda: True
 
     def exploit(self, observations):
+        # start_time = time.time()
         observations, legal_actions = observations[1]
         actions = DQNPolicy.eval_policy(
             self.network, self.atoms, self.online_params,
             next(self.rng), observations, legal_actions)
+        # print('exploit took {} seconds'.format(time.time()-start_time))
         return jax.tree_util.tree_map(onp.array, actions)
 
     def explore(self, observations):
+        # start_time = time.time()
         observations, legal_actions = observations[1]
         _, actions = DQNPolicy.policy(
             self.network, self.atoms, self.online_params,
             self.params.epsilon(self.train_step), next(self.rng),
             observations, legal_actions)
+        # print('explore took {} seconds'.format(time.time()-start_time))
         return jax.tree_util.tree_map(onp.array, actions)
     
     # deprecated with new implementation for stacking
@@ -306,7 +311,7 @@ class DQNAgent:
         pass
 
     def add_experience(self, observations_tm1, actions_tm1, rewards_t, observations_t, term_t):
-
+        # start_time = time.time()
         obs_vec_tm1 = observations_tm1[1][0]
         obs_vec_t = observations_t[1][0]
         legal_actions_t = observations_t[1][1]
@@ -318,6 +323,7 @@ class DQNAgent:
             obs_vec_t,
             legal_actions_t,
             term_t)
+        # print('add_exp took {} seconds'.format(time.time()-start_time))
         
     def shape_rewards(self, observations, moves):
         
@@ -328,6 +334,7 @@ class DQNAgent:
         return (0, 0)
 
     def update(self):
+        # start_time=time.time()
         """Make one training step.
         """
 
@@ -357,6 +364,8 @@ class DQNAgent:
             self.trg_params = self.online_params
 
         self.train_step += 1
+
+        # print('update took {} seconds'.format(time.time()-start_time))
         
     def create_stacker(self, obs_len, n_states):
         return VectorizedObservationStacker(self.params.history_size, 
