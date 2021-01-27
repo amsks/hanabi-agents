@@ -313,15 +313,17 @@ class AgentDQNPopulation:
         trg_weights = []
         opt_states = []
         experience = []
-        parameters = [[],[]]
+        parameters = [[],[], []]
         for agent in self.agents:
             online_weights.append(agent.online_params)
             trg_weights.append(agent.trg_params)
             opt_states.append(agent.opt_state)
             experience.append(agent.experience)
-            print(agent.learning_rate)
             parameters[0].append(float(agent.learning_rate))
             parameters[1].append(int(agent.buffersize))
+            parameters[2].append(int(agent.train_step))
+            
+
         return {'online_weights' : online_weights, 'trg_weights' : trg_weights,
                 'opt_states' : opt_states, 'experience' : experience, 'parameters' : parameters}
     
@@ -330,10 +332,8 @@ class AgentDQNPopulation:
 
             agent.online_params = characteristics['online_weights'][i][0]
             agent.trg_params = characteristics['trg_weights'][i][0]
-            agent.opt_state = characteristics['opt_states'][i]
-            # print(agent.opt_state)
-            agent.experience = characteristics['experience'][i]
-            
+            agent.opt_state = characteristics['opt_states'][i]      
+            agent.experience = characteristics['experience'][i]       
             agent.learning_rate = characteristics['parameters'][0][i][0]
-            print(agent.learning_rate)
             agent.buffersize = characteristics['parameters'][1][i][0]
+            agent.train_step = characteristics['parameters'][2][i][0]
