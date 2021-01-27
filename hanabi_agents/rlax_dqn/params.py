@@ -9,13 +9,13 @@ class RlaxRainbowParams(NamedTuple):
     target_update_period: int = 500
     discount: float = 0.99
     epsilon: Union[Callable[[int], float], float] = lambda x: 0.0
-    learning_rate: float = 2.5e-3
+    learning_rate: float = 6.25e-5
     layers: List[int] = [512, 512]
     use_double_q: bool = True
     use_priority: bool = False
     experience_buffer_size: int = 2**19
     seed: int = 1234
-    n_atoms: int = 51
+    n_atoms: int = 31
     atom_vmax: int = 25
     beta_is: Union[Callable[[int], float], float] = lambda x: 0.4
     priority_w: float = 0.6
@@ -45,7 +45,7 @@ class PBTParams(NamedTuple):
         discard_perc -- Percentage of atomic agents to discard of total population during evolutionary steps.
     """
 
-    population_size: int = 2
+    population_size: int = 10
     discard_percent: float = 0.8
     lr_factor: float = 0.2
     lr_start_value: float = 6.25e-5
