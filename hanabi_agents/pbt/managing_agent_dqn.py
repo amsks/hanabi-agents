@@ -299,8 +299,16 @@ class AgentDQNPopulation:
         for loser in index_losers:
             winner = random.choice(survivor_attributes)
             self.agents[loser].overwrite_weights(winner[2])
-            self.agents[loser].overwrite_lr(self.pbt_params.lr_factor, winner[0])
-            self.agents[loser].change_buffersize(self.pbt_params.buffersize_factor, winner[1])
+            if self.pbt_params.change_learning_rate:
+                self.agents[loser].overwrite_lr(self.pbt_params.lr_factor, winner[0])
+            if self.pbt_params.change_buffersize:
+                self.agents[loser].change_buffersize(self.pbt_params.buffersize_factor, winner[1])
+            if self.pbt_params.change_min_play_probability:
+                pass
+            if self.pbt_params.change_w_play_probability:
+                pass
+            if self.pbt_params.change_penalty_last_of_kind:
+                pass
             self.pbt_counter[loser] = 0
         # agents_status(self.agents)
 
