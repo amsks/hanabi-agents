@@ -48,8 +48,8 @@ class PBTParams(NamedTuple):
     population_size: int = 20
     discard_percent: float = 0.8
     individual_reward_shaping: bool = False
-    life_span: int = 3
-    generations: int = 1750
+    life_span: int = 99
+    generations: int = 70
 
     change_buffersize: bool = True
     buffersize_start_factor: int = 4

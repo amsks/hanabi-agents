@@ -253,8 +253,8 @@ class AgentDQNPopulation:
         rdy_agents = np.sum(self.readiness)
         orig_index = np.where(self.readiness == 1)[0]
         no_fittest = rdy_agents - int(rdy_agents * self.pbt_params.discard_percent)
-        index_loser = orig_index[np.argpartition(-mean_reward[self.readiness], no_fittest)[:no_fittest]]
-        index_survivor = orig_index[np.argpartition(mean_reward[self.readiness], no_fittest)[:no_fittest]]
+        index_loser = orig_index[np.argpartition(mean_reward[self.readiness], no_fittest)[:no_fittest]]
+        index_survivor = orig_index[np.argpartition(-mean_reward[self.readiness], no_fittest)[:no_fittest]]
         print('Agents to pass their weights are {}'.format(index_survivor))
         print('Agents to be overwritten are {}'.format(index_loser))
         print('Current epochs per agent {}'.format(self.pbt_counter))
