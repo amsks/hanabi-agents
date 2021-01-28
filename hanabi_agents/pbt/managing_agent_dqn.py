@@ -81,7 +81,7 @@ class AgentDQNPopulation:
         self.states_reset = np.full((self.n_states,), False)
         self.evaluations = np.zeros((self.n_states,))
         self.prev_reward = np.zeros(self.pop_size)
-        self.pbt_counter = np.zeros(self.pop_size)
+        self.pbt_counter = np.zeros(self.pop_size) + 30
 
         # Make rewardshaping object as list/single objective for general/individual shaping
         if self.pbt_params.individual_reward_shaping:
@@ -255,6 +255,10 @@ class AgentDQNPopulation:
         no_fittest = rdy_agents - int(rdy_agents * self.pbt_params.discard_percent)
         index_loser = orig_index[np.argpartition(-mean_reward[self.readiness], no_fittest)[no_fittest:]]
         index_survivor = orig_index[np.argpartition(-mean_reward[self.readiness], no_fittest)[:no_fittest]]
+        print('Agents to pass their weights are {}'.format(index_survivor))
+        print('Agents to be overwritten are {}'.format(index_loser))
+        print('Current epochs per agent {}'.format(self.pbt_counter))
+        time.sleep(10)
         return index_survivor, index_loser
 
     def pbt_eval(self, mean_reward):
@@ -282,7 +286,9 @@ class AgentDQNPopulation:
                 pass
             self.pbt_counter[loser] = 0
         # agents_status(self.agents)
-
+        print('Update current epochs per agent {}'.format(self.pbt_counter))
+        time.sleep(10)
+        
     def save_pbt_log(self):
         pass
 

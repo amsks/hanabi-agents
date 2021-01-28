@@ -5,7 +5,7 @@ import gin
 class RlaxRainbowParams(NamedTuple):
     """Parameterization class for Rlax-based Rainbow DQN agent."""
 
-    train_batch_size: int = 128
+    train_batch_size: int = 256
     target_update_period: int = 500
     discount: float = 0.99
     epsilon: Union[Callable[[int], float], float] = lambda x: 0.0
@@ -45,11 +45,11 @@ class PBTParams(NamedTuple):
         discard_perc -- Percentage of atomic agents to discard of total population during evolutionary steps.
     """
 
-    population_size: int = 4
+    population_size: int = 20
     discard_percent: float = 0.8
     individual_reward_shaping: bool = False
-    life_span: int = 100
-    generations: int = 350
+    life_span: int = 99
+    generations: int = 70
 
     change_buffersize: bool = True
     buffersize_start_factor: int = 4
