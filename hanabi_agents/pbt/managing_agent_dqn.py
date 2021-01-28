@@ -251,9 +251,10 @@ class AgentDQNPopulation:
     def _choose_fittest(self, mean_reward):
         """Chosses the fittest agents after evaluation run and overwrites all the other agents with weights + permutation of lr + buffersize"""
         rdy_agents = np.sum(self.readiness)
+        orig_index = np.where(self.readiness == 1)[0]
         no_fittest = rdy_agents - int(rdy_agents * self.pbt_params.discard_percent)
-        index_loser = np.argpartition(-mean_reward[self.readiness], no_fittest)[no_fittest:]
-        index_survivor = np.argpartition(-mean_reward[self.readiness], no_fittest)[:no_fittest]
+        index_loser = orig_index[np.argpartition(-mean_reward[self.readiness], no_fittest)[no_fittest:]]
+        index_survivor = orig_index[np.argpartition(-mean_reward[self.readiness], no_fittest)[:no_fittest]]
         return index_survivor, index_loser
 
     def pbt_eval(self, mean_reward):
@@ -307,7 +308,6 @@ class AgentDQNPopulation:
     
     def restore_characteristics(self, characteristics):
         for i, agent in enumerate(self.agents):
-            print(len(characteristics['online_weights']))
             print('Restoring agent no {}!'.format(i))
             agent.online_params = characteristics['online_weights'][i]
             agent.trg_params = characteristics['trg_weights'][i]
