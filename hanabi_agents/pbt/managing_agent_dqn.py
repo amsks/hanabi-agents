@@ -81,7 +81,7 @@ class AgentDQNPopulation:
         self.states_reset = np.full((self.n_states,), False)
         self.evaluations = np.zeros((self.n_states,))
         self.prev_reward = np.zeros(self.pop_size)
-        self.pbt_counter = np.zeros(self.pop_size) + 30
+        self.pbt_counter = np.zeros(self.pop_size)
 
         # Make rewardshaping object as list/single objective for general/individual shaping
         if self.pbt_params.individual_reward_shaping:
@@ -288,7 +288,7 @@ class AgentDQNPopulation:
         # agents_status(self.agents)
         print('Update current epochs per agent {}'.format(self.pbt_counter))
         time.sleep(10)
-        
+
     def save_pbt_log(self):
         pass
 
