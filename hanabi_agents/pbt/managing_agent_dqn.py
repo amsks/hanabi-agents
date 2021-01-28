@@ -73,7 +73,6 @@ class AgentDQNPopulation:
         self.env_obs_size = observation_spec_vec_batch(env_obs_size, int(self.pop_size))[0]
 
         self.pop_size = self.pbt_params.population_size
-        print('!!!!!!!!!!!!!!!!!!!', self.pop_size)
 
         assert (self.n_states % self.pop_size) == 0, \
             "number of states must be a multiple of population size"
@@ -82,7 +81,7 @@ class AgentDQNPopulation:
         self.states_reset = np.full((self.n_states,), False)
         self.evaluations = np.zeros((self.n_states,))
         self.prev_reward = np.zeros(self.pop_size)
-        self.pbt_counter = np.zeros(0)
+        self.pbt_counter = np.zeros(self.pop_size)
 
         # Make rewardshaping object as list/single objective for general/individual shaping
         if self.pbt_params.individual_reward_shaping:
@@ -162,26 +161,13 @@ class AgentDQNPopulation:
 
     def explore(self, observations):
         """Explore functionality: Breaks env_obs in chunks of obs_chunk_size and passes it to respective sub-agents """
-        # TODO: concatenate HanabiMoveVectors / slicing HanabiObservationVector
-        self.pbt_counter += 1
         action_chunks = []
-        # start_time = time.time()
-        # for_time = 0 
         for i, agent in enumerate(self.agents):
-            # for_time_0 = time.time()
             obs_chunk = (observations, (observations[1][0][i * self.obs_chunk_size : (i + 1) * self.obs_chunk_size],
                          observations[1][1][i * self.obs_chunk_size : (i + 1) * self.obs_chunk_size]))
-            # for_time += (time.time()-for_time_0)
-
             actions_rem = agent.explore(obs_chunk)             
             action_chunks.append(actions_rem)
-            # print('part', i)
-        # ray.wait(action_chunks, self.pop_size)
-
-        # actions = np.concatenate(ray.get(action_chunks), axis = 0)
         actions = np.concatenate(action_chunks, axis = 0)
-        # print('explore took {} seconds'.format(time.time()-start_time))
-        # print('for_time took {} seconds'.format(for_time))
         return actions
 
 
@@ -189,24 +175,13 @@ class AgentDQNPopulation:
         """Breaks env_obs in chunks of obs_chunk_size and passes it to respective sub-agents"""
         chunk_size = int(len(observations[0])/self.pop_size)
         action_chunks = []
-        # start_time = time.time()
-        # for_time = 0
         for i, agent in enumerate(self.agents):
             
             obs_chunk = (observations, (observations[1][0][i * chunk_size : (i + 1) * chunk_size],
                          observations[1][1][i * chunk_size : (i + 1) * chunk_size]))
-            
-            # for_time_0 = time.time()
             actions_rem = agent.exploit(obs_chunk)
-            # for_time += (time.time()-for_time_0)
             action_chunks.append(actions_rem)
-        # print(ray.get(action_chunks))
-        # actions_rem = ray.get(actions_rem)
-        # ray.wait(action_chunks, self.pop_size)
-        # actions = np.concatenate(ray.get(action_chunks), axis = 0)
         actions = np.concatenate(action_chunks, axis = 0)
-        # print('exploit took {} seconds'.format(time.time()-start_time))
-        # print('for_time took {} seconds'.format(for_time))
 
         return actions
 
@@ -259,13 +234,8 @@ class AgentDQNPopulation:
 
     def update(self):
         '''Train the agent's policy'''
-        # start_time = time.time()
-        # updates = []
         for agent in self.agents:
             agent.update()
-            # updates.append(agent.update.remote(0))
-        # ray.wait(updates, self.pop_size)
-        # print('update took {} seconds'.format(time.time()-start_time))
 
     def requires_vectorized_observation(self):
         return True
@@ -337,11 +307,15 @@ class AgentDQNPopulation:
     
     def restore_characteristics(self, characteristics):
         for i, agent in enumerate(self.agents):
-
-            agent.online_params = characteristics['online_weights'][i][0]
-            agent.trg_params = characteristics['trg_weights'][i][0]
+            print(len(characteristics['online_weights']))
+            print('Restoring agent no {}!'.format(i))
+            agent.online_params = characteristics['online_weights'][i]
+            agent.trg_params = characteristics['trg_weights'][i]
             agent.opt_state = characteristics['opt_states'][i]      
             agent.experience = characteristics['experience'][i]       
-            agent.learning_rate = characteristics['parameters'][0][i][0]
-            agent.buffersize = characteristics['parameters'][1][i][0]
-            agent.train_step = characteristics['parameters'][2][i][0]
+            agent.learning_rate = characteristics['parameters'][0][i]
+            agent.buffersize = characteristics['parameters'][1][i]
+            agent.train_step = characteristics['parameters'][2][i]
+
+    def increase_pbt_counter(self):
+        self.pbt_counter += 1

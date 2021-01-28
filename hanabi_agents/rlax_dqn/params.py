@@ -45,7 +45,7 @@ class PBTParams(NamedTuple):
         discard_perc -- Percentage of atomic agents to discard of total population during evolutionary steps.
     """
 
-    population_size: int = 20
+    population_size: int = 4
     discard_percent: float = 0.8
     individual_reward_shaping: bool = False
     life_span: int = 100
