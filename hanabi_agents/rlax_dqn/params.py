@@ -13,7 +13,7 @@ class RlaxRainbowParams(NamedTuple):
     layers: List[int] = [512, 512]
     use_double_q: bool = True
     use_priority: bool = False
-    experience_buffer_size: int = 2**19
+    experience_buffer_size: int = 2**15
     seed: int = 1234
     n_atoms: int = 31
     atom_vmax: int = 25
@@ -25,6 +25,7 @@ class RlaxRainbowParams(NamedTuple):
 class RewardShapingParams(NamedTuple):
     
     # conservative agent
+    use_reward_shaping: bool = True
     min_play_probability: float = 0
     w_play_probability: float = 0
     penalty_last_of_kind: float = 0
@@ -48,8 +49,14 @@ class PBTParams(NamedTuple):
     population_size: int = 20
     discard_percent: float = 0.8
     individual_reward_shaping: bool = False
-    life_span: int = 99
-    generations: int = 70
+    life_span: int = 1
+    generations: int = 3500
+    saver_threshold: float = 13
+    pool_path: str = 'pool'
+    db_path: str = 'obs.db'
+    w_diversity: float = 10
+    obs_no: int = 10000
+    n_mean: int = 5
 
     change_buffersize: bool = True
     buffersize_start_factor: int = 4

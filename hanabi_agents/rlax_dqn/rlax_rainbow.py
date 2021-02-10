@@ -422,7 +422,7 @@ class DQNAgent:
         """Alters the size of the current model's buffer_size randomly by buffer_factor up/down"""
         if self.buffersize <= 512:
             choices = [buffer_factor, 1]
-        elif self.buffersize >= 2**15:
+        elif self.buffersize >= 2**20:
             choices = [1, 1 / buffer_factor]
         else:
             choices = [buffer_factor, 1/buffer_factor]
