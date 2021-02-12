@@ -256,8 +256,8 @@ class AgentDQNPopulation:
         """saves the weights of all agents to the respective directories"""
         for i, agent in enumerate(self.agents):
             if self.prev_reward < mean_reward[i]:
-                agent.save_weights(os.path.join(path, "agent_" + str(i)), "ckpt_" + str(agent.train_step))
-        self.prev_reward = np.max(mean_reward)
+                agent.save_weights(path, "ckpt_" + str(agent.train_step))
+                self.prev_reward = mean_reward[i]
     
     def save_specific_agent(self, path, index, act_vec, score):
         if not os.path.isdir(path):
@@ -268,8 +268,6 @@ class AgentDQNPopulation:
         agent_name = names.get_full_name().replace(' ', '_') + '_{}'.format(str(score).replace('.','_'))
         self.agents[index].save_weights(os.path.join(path, 'agents'), agent_name)
         path_npy = os.path.join(path, 'action_vecs/{}'.format(agent_name))
-        # with open(path_npy, 'wb') as f:
-        
         np.save(path_npy, act_vec)
 
     def _choose_fittest(self, mean_reward):
@@ -311,20 +309,22 @@ class AgentDQNPopulation:
             action_vec.append(self.agents[int(elem)].exploit(obs))
         return action_vec, agent_indices
 
-    def load_existing_agents(self, pool_path):
-        vecs_path = os.path.join(pool_path, 'action_vecs')
+    def load_existing_agents(self):
+        vecs_path = os.path.join(self.pbt_params.pool_path, 'action_vecs')
+        
         if not os.path.isdir(vecs_path):
             os.makedirs(vecs_path)
         no_agents = len([name for name in os.listdir(vecs_path) if os.path.isfile(name)])
+        print(vecs_path, no_agents)
         action_vecs = []      
         for file in os.listdir(vecs_path):
             action_vecs.append(np.load(os.path.join(vecs_path, file)))
         return action_vecs
 
-    def mutual_information(self, pool_path, db_path):
+    def mutual_information(self, db_path):
         obs = self._load_db(db_path)
         actions_curr_agents, agent_indices = self.generate_action_vector(obs)
-        actions_exis_agents = self.load_existing_agents(pool_path)
+        actions_exis_agents = self.load_existing_agents()
         actions_curr_agents.extend(actions_exis_agents)
         combined = actions_curr_agents
         no_obs = len(combined[0])
@@ -355,7 +355,7 @@ class AgentDQNPopulation:
             parameters for those overwritten (learning rate / buffersize)"""
         self.readiness = self.pbt_counter >= self.pbt_params.life_span
         print('Mean reward without Diversity: {}'.format(mean_reward))
-        diversity_matrix, action_vectors = self.mutual_information(os.path.join(output_dir, self.pbt_params.pool_path), self.pbt_params.db_path)
+        diversity_matrix, action_vectors = self.mutual_information( self.pbt_params.db_path)
         mean_reward_div = self.quantify_diversity(diversity_matrix, mean_reward)
         print('Mean reward + Diversity measure is {}'.format(mean_reward_div))
 
@@ -363,7 +363,7 @@ class AgentDQNPopulation:
             print('XXXXXXXXXXXXXXXXXXXXXXXXXXXX SAVING A NEW AGENT XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX')
             index_max = np.where(self.readiness == 1)[0][np.argmax(mean_reward_div[self.readiness])]
             score = np.max(mean_reward_div[self.readiness])
-            self.save_specific_agent(os.path.join(output_dir, self.pbt_params.pool_path), index_max, action_vectors[np.argmax(mean_reward_div[self.readiness])], score)
+            self.save_specific_agent(self.pbt_params.pool_path, index_max, action_vectors[np.argmax(mean_reward_div[self.readiness])], score)
 
         index_survivor, index_losers = self._choose_fittest(mean_reward_div)
 
@@ -439,5 +439,9 @@ class AgentDQNPopulation:
                                                                                                                     self.reward_shaper[i].penalty_last_of_kind, 
                                                                                                                     self.reward_shaper[i].min_play_probability, 
                                                                                                                     self.reward_shaper[i].w_play_probability))
+    def restore_weights(self, restore_path):
+        for agent in self.agents:
+            agent.restore_weights(restore_path, restore_path)
+    
     def increase_pbt_counter(self):
         self.pbt_counter += 1
