@@ -3,6 +3,7 @@ import numpy as onp
 import jax
 from jax import numpy as jnp
 from jax.tree_util import tree_flatten, tree_unflatten, register_pytree_node_class
+import pickle
 
 from collections import namedtuple
 
@@ -50,6 +51,31 @@ class PriorityBuffer(ExperienceBuffer):
         self.max_priority = max(self.max_priority, onp.max(priorities))
         self.min_priority = min(self.min_priority, onp.min(priorities))
         self.sum_tree.update_values(indices, priorities)
+        
+    def serializable(self):
+        
+        tree_size = self.sum_tree.get_capacity()
+        tree_index = range(tree_size)
+        lst_serialize = [self.max_priority,
+                         self.min_priority,
+                         self.alpha,
+                         tree_size,
+                         self.sum_tree.get_values(tree_index)]
+        print(self.max_priority, self.min_priority, self.alpha, tree_size)
+        print(self.sum_tree.get_values(tree_index)[:10])
+        return super().serializable(), lst_serialize
+    
+    def load(self, lst_serializable):
+        super().load(lst_serializable[0])
+        self.max_priority = lst_serializable[1][0]
+        self.min_priority = lst_serializable[1][1]
+        self.alpha = lst_serializable[1][2]
+        capacity = lst_serializable[1][3]
+        tree_index = range(capacity)
+        self.sum_tree = SumTree(capacity)
+        self.sum_tree.update_values(tree_index, lst_serializable[1][4])
+        print(self.max_priority, self.min_priority, self.alpha, self.sum_tree.get_capacity())
+        print(self.sum_tree.get_values(tree_index)[:10])
 
 
 
