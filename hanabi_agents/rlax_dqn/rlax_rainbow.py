@@ -8,24 +8,26 @@ from typing import Tuple, List
 from os.path import join as join_path
 
 import numpy as onp
+import random
 
 import haiku as hk
 import jax
-from jax.experimental import optix
+import optax
 import jax.numpy as jnp
 import rlax
 import chex
+import ray
+import time
 
 from .experience_buffer import ExperienceBuffer
 from .priority_buffer import PriorityBuffer
 from .noisy_mlp import NoisyMLP
 from .params import RlaxRainbowParams
+from .vectorized_stacker import VectorizedObservationStacker
 
 
 DiscreteDistribution = collections.namedtuple(
     "DiscreteDistribution", ["sample", "probs", "logprob", "entropy"])
-
-
 
 
 class DQNPolicy:
@@ -144,7 +146,6 @@ class DQNPolicy:
         logits = network.apply(net_params, None, obs)
         probs = jax.nn.softmax(logits, axis=-1)
         q_vals = jnp.mean(probs * atoms, axis=-1)
-
         q_vals = jnp.where(lms, q_vals, -jnp.inf)
 
         # compute actions
@@ -169,7 +170,6 @@ class DQNLearning:
             term_t     -- terminal state at time t?
         """
 
-
         def categorical_double_q_td(online_params, trg_params, obs_tm1, a_tm1, r_t, obs_t, lm_t, term_t, discount_t):
             q_logits_tm1 = network.apply(online_params, None, obs_tm1)
             q_logits_t = network.apply(trg_params, None, obs_t)
@@ -180,8 +180,13 @@ class DQNLearning:
             #  q_t = jnp.where(lm_t, q_t, -1e3)
             # set q values to zero if the state is terminal, i.e.
             #  q_t = jnp.where(jnp.broadcast_to(term_t, q_t.shape), 0.0, q_t)
+            
+            # set discount to zero if state terminal
+            term_t = term_t.reshape(r_t.shape)
+            discount_t = jnp.where(term_t, 0, discount_t)
+
             batch_error = jax.vmap(rlax.categorical_double_q_learning,
-                                   in_axes=(None, 0, 0, 0, None, None, 0, 0,))
+                                   in_axes=(None, 0, 0, 0, 0, None, 0, 0,))
             td_errors = batch_error(atoms[0], q_logits_tm1, a_tm1, r_t, discount_t, atoms[0], q_logits_t, q_sel)
             return td_errors
 
@@ -214,16 +219,17 @@ class DQNLearning:
             prios)
 
         updates, opt_state_t = optimizer.update(grads, opt_state)
-        online_params_t = optix.apply_updates(online_params, updates)
+        online_params_t = optax.apply_updates(online_params, updates)
         return online_params_t, opt_state_t, new_prios
 
-
+# @ray.remote(num_gpus = 0.2, num_cpus = 1)
 class DQNAgent:
     def __init__(
             self,
             observation_spec,
             action_spec,
-            params: RlaxRainbowParams = RlaxRainbowParams()):
+            params: RlaxRainbowParams = RlaxRainbowParams(),
+            reward_shaper = None):
 
         if not callable(params.epsilon):
             eps = params.epsilon
@@ -232,6 +238,7 @@ class DQNAgent:
             beta = params.beta_is
             params = params._replace(beta_is=lambda ts: beta)
         self.params = params
+        self.reward_shaper = reward_shaper
         self.rng = hk.PRNGSequence(jax.random.PRNGKey(params.seed))
 
         # Build and initialize Q-network.
@@ -249,26 +256,31 @@ class DQNAgent:
         self.network = build_network(params.layers,
                                      (action_spec.num_values, params.n_atoms))
         self.trg_params = self.network.init(
-            next(self.rng), observation_spec.generate_value().astype(onp.float16))
+            next(self.rng), 
+            onp.zeros((observation_spec.shape[0], observation_spec.shape[1] * self.params.history_size), dtype = onp.float16))
         self.online_params = self.trg_params
         self.atoms = jnp.tile(jnp.linspace(-params.atom_vmax, params.atom_vmax, params.n_atoms),
                               (action_spec.num_values, 1))
 
         # Build and initialize optimizer.
-        self.optimizer = optix.adam(params.learning_rate, eps=3.125e-5)
+        self.optimizer = optax.adam(params.learning_rate, eps=3.125e-5)
         self.opt_state = self.optimizer.init(self.online_params)
         self.train_step = 0
         self.update_q = DQNLearning.update_q
 
+        self.learning_rate = self.params.learning_rate
+        self.buffersize = self.params.experience_buffer_size
+
         if params.use_priority:
             self.experience = PriorityBuffer(
-                observation_spec.shape[1],
+                observation_spec.shape[1] * self.params.history_size,
                 action_spec.num_values,
                 1,
-                params.experience_buffer_size)
+                params.experience_buffer_size,
+                alpha=self.params.priority_w)
         else:
             self.experience = ExperienceBuffer(
-                observation_spec.shape[1],
+                observation_spec.shape[1] * self.params.history_size,
                 action_spec.num_values,
                 1,
                 params.experience_buffer_size)
@@ -276,39 +288,53 @@ class DQNAgent:
         self.requires_vectorized_observation = lambda: True
 
     def exploit(self, observations):
+        # start_time = time.time()
         observations, legal_actions = observations[1]
         actions = DQNPolicy.eval_policy(
             self.network, self.atoms, self.online_params,
             next(self.rng), observations, legal_actions)
+        # print('exploit took {} seconds'.format(time.time()-start_time))
         return jax.tree_util.tree_map(onp.array, actions)
 
     def explore(self, observations):
+        # start_time = time.time()
         observations, legal_actions = observations[1]
         _, actions = DQNPolicy.policy(
             self.network, self.atoms, self.online_params,
             self.params.epsilon(self.train_step), next(self.rng),
             observations, legal_actions)
+        # print('explore took {} seconds'.format(time.time()-start_time))
         return jax.tree_util.tree_map(onp.array, actions)
-
+    
+    # deprecated with new implementation for stacking
     def add_experience_first(self, observations, step_types):
-        observations, _ = observations[1]
-        first_steps = step_types == 0
-        self.last_obs[first_steps] = observations[first_steps]
+        pass
 
-    def add_experience(self, observations, actions, rewards, step_types):
-        observations, legal_actions = observations[1]
+    def add_experience(self, observations_tm1, actions_tm1, rewards_t, observations_t, term_t):
+        # start_time = time.time()
+        obs_vec_tm1 = observations_tm1[1][0]
+        obs_vec_t = observations_t[1][0]
+        legal_actions_t = observations_t[1][1]
 
-        not_first_steps = step_types != 0
         self.experience.add_transitions(
-            self.last_obs[not_first_steps],
-            actions[not_first_steps].reshape((-1, 1)),
-            rewards[not_first_steps].reshape((-1, 1)),
-            observations[not_first_steps],
-            legal_actions[not_first_steps],
-            (step_types[not_first_steps] == 2).reshape((-1, 1)))
-        self.last_obs[not_first_steps] = observations[not_first_steps]
+            obs_vec_tm1,
+            actions_tm1,
+            rewards_t,
+            obs_vec_t,
+            legal_actions_t,
+            term_t)
+        # print('add_exp took {} seconds'.format(time.time()-start_time))
+        
+    def shape_rewards(self, observations, moves):
+        
+        if self.reward_shaper is not None:
+            shaped_rewards, shape_type = self.reward_shaper.shape(observations[0], 
+                                                                  moves)
+            return onp.array(shaped_rewards), onp.array(shape_type)
+        return (0, 0)
 
     def update(self):
+        # start_time=time.time()
         """Make one training step.
         """
 
@@ -339,6 +365,13 @@ class DQNAgent:
 
         self.train_step += 1
 
+        # print('update took {} seconds'.format(time.time()-start_time))
+        
+    def create_stacker(self, obs_len, n_states):
+        return VectorizedObservationStacker(self.params.history_size, 
+                                            obs_len,
+                                            n_states)
+
     def __repr__(self):
         return f"<rlax_dqn.DQNAgent(params={self.params})>"
 
@@ -364,3 +397,37 @@ class DQNAgent:
             self.online_params = pickle.load(iwf)
         with open(trg_weights_file, 'rb') as iwf:
             self.trg_params = pickle.load(iwf)
+
+    """Functions necessary for PBT"""
+
+    def get_agent_attributes(self):
+        """Retrieves network weights, to copy them over to other models"""
+        # network_weights = self.online_params
+        attributes = (self.learning_rate, self.buffersize, self.online_params)
+        return attributes
+
+    def overwrite_weights(self, network_weights):
+        """Overwrites this model's network weights with those taken from another model in the Population"""
+        self.online_params = network_weights
+        self.trg_params = network_weights
+
+    def overwrite_lr(self, lr_factor, lr_survivor):
+        """Resets the optimizer with altered learning rate"""
+        self.learning_rate = lr_survivor * (1 + (random.randint(0,1) * 2 - 1) * lr_factor)
+        # self.params._replace(learning_rate = new_lr)
+        self.optimizer = optax.adam(self.learning_rate, eps=3.125e-5)
+        self.opt_state = self.optimizer.init(self.online_params)
+
+    def change_buffersize(self, buffer_factor, buffersize_survivor):
+        """Alters the size of the current model's buffer_size randomly by buffer_factor up/down"""
+        if self.buffersize <= 512:
+            choices = [buffer_factor, 1]
+        elif self.buffersize >= 2**20:
+            choices = [1, 1 / buffer_factor]
+        else:
+            choices = [buffer_factor, 1/buffer_factor]
+        self.buffersize = int(buffersize_survivor * random.choice(choices))
+
+        self.experience.change_size(self.buffersize)
+
+        #TODO: implement for priority replay
