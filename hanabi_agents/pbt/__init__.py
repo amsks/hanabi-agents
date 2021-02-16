@@ -1,1 +1,2 @@
 from .managing_agent_dqn import AgentDQNPopulation
+from .database_filler_agent import DataGenerationAgent
