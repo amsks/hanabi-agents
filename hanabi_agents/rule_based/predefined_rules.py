@@ -156,10 +156,23 @@ test_rules = [
     Ruleset.legal_random
 ]
 
+test_rules = [
+    Ruleset.tell_most_information,
+    Ruleset.play_probably_safe_factory(0.99,False),
+    #Ruleset.tell_unknown,
+    #todo: test
+    #Ruleset.tell_anyone_useless_card,
+    #todo:
+    #Ruleset.tell_most_information,
+    Ruleset.tell_playable_card,
+    Ruleset.discard_probably_useless_factory(0.75),
+    # Ruleset.tell_randomly,
+    Ruleset.discard_oldest_first,
+    # Ruleset.legal_random
+]
 
 
-
-def random_rules(num_rules = 10, used_ruleset = big_ruleset):
+def random_rules(num_rules = 10, used_ruleset = test_rules):
     rules = random.sample(used_ruleset, num_rules)
     #rules.append(Ruleset.legal_random) 
     return rules
