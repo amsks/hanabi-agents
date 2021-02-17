@@ -60,6 +60,7 @@ for i in range(10):
     #print("Index:", scores.index(max(scores)))
     
     #with open("agents.txt", "w") as agents_file:
+    print(f'Diversities are {agents[0].diversities}')
     #    agents_file.write(str(my_rules))
     stop_time = timeit.default_timer()
     print("Time:" , stop_time - start_time)
