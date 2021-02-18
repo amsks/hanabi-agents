@@ -52,7 +52,56 @@ class PriorityBuffer(ExperienceBuffer):
         self.sum_tree.update_values(indices, priorities)
 
 
+    def change_size(self, new_size):
 
+        def get_indices_old_obs(new_size):
+            # buffer being extended
+            if self.capacity < new_size:
+                # buffer full
+                if self.size == self.capacity:
+                    self.oldest_entry = self.size
+                    return 0, self.capacity, True
+                # buffer not filled yet
+                else:
+                    return 0, self.oldest_entry, True
+            # buffer being shrinked
+            else:
+                # buffer full
+                if self.size == self.capacity:
+                    # buffer-tail can be copied unfragmented
+                    if self.oldest_entry >= new_size:
+                        return (self.oldest_entry - new_size), self.oldest_entry, True
+                    # most recent buffer entries are fragmented between bufferend and beginning
+                    else:
+                        return ((self.capacity - (new_size - self.oldest_entry)), self.capacity ), (0, self.oldest_entry), False
+                # buffer not yet full
+                else:
+                    if self.oldest_entry >= new_size:
+                        return (self.oldest_entry - new_size), self.oldest_entry, True
+                    else:
+                        return 0, self.oldest_entry, True
+
+
+        start_ind, end_ind, unfragmented = get_indices_old_obs(new_size)
+        
+        def ind_list(start_ind, end_ind, unfragmented):
+            if unfragmented:
+                return list(range(start_ind, end_ind))
+            else:
+                list_1 = list(range(start_ind[0], start_ind[1]))
+                list_2 = list(range(end_ind[0], end_ind[1]))
+                return list_1.extend(list_2)
+
+        sumtree_ind = ind_list(start_ind, end_ind, unfragmented)
+        intermediate_sumtree = SumTree(new_size)
+
+        prio_values = self.sum_tree.get_values(sumtree_ind)
+        intermediate_sumtree.update_values(sumtree_ind, prio_values)
+        self.sum_tree = intermediate_sumtree
+        
+        super(PriorityBuffer, self).change_size(new_size)
+        
+        
 
 
 
