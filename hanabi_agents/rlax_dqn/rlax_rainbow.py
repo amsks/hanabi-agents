@@ -382,6 +382,14 @@ class DQNAgent:
             pickle.dump(jax.tree_util.tree_map(onp.array, self.opt_state), of)
         with open(join_path(path, "rlax_rainbow_" + fname_part + "_experience.pkl"), 'wb') as of:
             pickle.dump(self.experience.serializable(), of)
+    
+    # older versions of haiku store weights as frozendict, convert to mutable dict and then to FlatMapping
+    def _compat_restore_weights(self, file_w):
+        weights = pickle.load(file_w)
+        mutable = hk.data_structures.to_mutable_dict(weights)
+        for m in mutable:
+            mutable[m] = hk.data_structures.to_mutable_dict(mutable[m])
+        return hk.data_structures.to_immutable_dict(mutable)
 
     def restore_weights(self, online_weights_file, 
                         trg_weights_file, 
@@ -390,9 +398,9 @@ class DQNAgent:
         """Restore online and target network weights from the specified files
         added: load optimizer state if file name given"""
         with open(online_weights_file, 'rb') as iwf:
-            self.online_params = pickle.load(iwf)
+            self.online_params = self._compat_restore_weights(iwf)#pickle.load(iwf)
         with open(trg_weights_file, 'rb') as iwf:
-            self.trg_params = pickle.load(iwf)
+            self.trg_params = self._compat_restore_weights(iwf)#pickle.load(iwf)
         # optimizer state
         if opt_state_file is not None:
             with open(opt_state_file, 'rb') as iwf:
