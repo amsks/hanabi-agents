@@ -325,33 +325,35 @@ class DQNAgent:
     def update(self):
         """Make one training step.
         """
+        
+        if not self.params.fixed_weights:
 
-        if self.params.use_priority:
-            sample_indices, prios, transitions = self.experience.sample_batch(
-                self.params.train_batch_size)
-        else:
-            transitions = self.experience.sample(self.params.train_batch_size)
-            prios = onp.ones(transitions.observation_tm1.shape[0])
-
-        self.online_params, self.opt_state, tds = self.update_q(
-            self.network,
-            self.atoms,
-            self.optimizer,
-            self.online_params,
-            self.trg_params,
-            self.opt_state,
-            transitions,
-            self.params.discount,
-            prios,
-            self.params.beta_is(self.train_step))
-
-        if self.params.use_priority:
-            self.experience.update_priorities(sample_indices, onp.abs(tds))
-
-        if self.train_step % self.params.target_update_period == 0:
-            self.trg_params = self.online_params
-
-        self.train_step += 1
+            if self.params.use_priority:
+                sample_indices, prios, transitions = self.experience.sample_batch(
+                    self.params.train_batch_size)
+            else:
+                transitions = self.experience.sample(self.params.train_batch_size)
+                prios = onp.ones(transitions.observation_tm1.shape[0])
+    
+            self.online_params, self.opt_state, tds = self.update_q(
+                self.network,
+                self.atoms,
+                self.optimizer,
+                self.online_params,
+                self.trg_params,
+                self.opt_state,
+                transitions,
+                self.params.discount,
+                prios,
+                self.params.beta_is(self.train_step))
+    
+            if self.params.use_priority:
+                self.experience.update_priorities(sample_indices, onp.abs(tds))
+    
+            if self.train_step % self.params.target_update_period == 0:
+                self.trg_params = self.online_params
+    
+            self.train_step += 1
         
     def create_stacker(self, obs_len, n_states):
         return VectorizedObservationStacker(self.params.history_size, 

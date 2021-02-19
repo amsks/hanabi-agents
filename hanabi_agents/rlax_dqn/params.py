@@ -20,6 +20,7 @@ class RlaxRainbowParams(NamedTuple):
     beta_is: Union[Callable[[int], float], float] = lambda x: 0.4
     priority_w: float = 0.6
     history_size: int = 1
+    fixed_weights: bool = False
     
 @gin.configurable
 class RewardShapingParams(NamedTuple):
