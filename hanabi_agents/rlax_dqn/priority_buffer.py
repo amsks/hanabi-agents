@@ -81,7 +81,6 @@ class PriorityBuffer(ExperienceBuffer):
                     else:
                         return 0, self.oldest_entry, True
 
-
         start_ind, end_ind, unfragmented = get_indices_old_obs(new_size)
         
         def ind_list(start_ind, end_ind, unfragmented):
@@ -94,35 +93,24 @@ class PriorityBuffer(ExperienceBuffer):
 
         sumtree_ind = ind_list(start_ind, end_ind, unfragmented)
         intermediate_sumtree = SumTree(new_size)
-
         prio_values = self.sum_tree.get_values(sumtree_ind)
-        intermediate_sumtree.update_values(sumtree_ind, prio_values)
+        #new sum_tree indices
+        new_indices = list(range(0, len(prio_values)))
+        intermediate_sumtree.update_values(new_indices, prio_values)
         self.sum_tree = intermediate_sumtree
         
         super(PriorityBuffer, self).change_size(new_size)
-        
-        
 
+    def get_info(self):
+        values = self.sum_tree.get_values(list(range(0, self.capacity)))
+        return values
 
+    def restore_sumtree(self, weights_sumtree):
+        sumT = SumTree(self.capacity)
+        values = weights_sumtree
+        sumT.update_values(list(range(0, self.capacity)), values)
+        self.sum_tree = sumT
 
-
-
-
-
-#  @register_pytree_node_class
-#  class Transition:
-#      def __init__(self, obs_tm1, action_tm1, reward_tm1, obs_t):
-#          self.obs_tm1 = obs_tm1
-#          self.action_tm1 = action_tm1
-#          self.reward_tm1 = reward_tm1
-#          self.obs_t = obs_t
-#
-#      def tree_flatten(self):
-#          return ((self.obs_tm1, self.action_tm1, self.reward_tm1, self.obs_t), None)
-#
-#      @classmethod
-#      def tree_unflatten(cls, aux_data, children):
-#          return cls(*children)
 
 @register_pytree_node_class
 class TreeNode:

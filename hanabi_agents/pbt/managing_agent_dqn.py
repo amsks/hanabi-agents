@@ -88,17 +88,6 @@ class AgentDQNPopulation:
 
         self.max_score = 15 #"""!!!!!!!!!!!!!!!!!!!!!!!!!"""
 
-        # Make rewardshaping object as list/single objective for general/individual shaping
-        # if self.pbt_params.individual_reward_shaping:
-        #     self.reward_shaper = []
-        #     # for i in range(self.pop_size):
-        #     with gin.config_scope('agent'+str('_0')):
-        #         self.reward_shaper.append(RewardShaper(self.reward_params))
-        # else:
-        #     self.reward_shaper = []
-        #     for i in range(self.pop_size):
-        #         self.reward_shaper.append(RewardShaper(self.reward_params))
-        # if self.reward_params.use_reward_shaping:
         self.reward_shaper = []
         for i in range(self.pop_size):
             self.reward_shaper.append(RewardShaper(self.reward_params))
@@ -408,13 +397,20 @@ class AgentDQNPopulation:
             online_weights.append(agent.online_params)
             trg_weights.append(agent.trg_params)
             opt_states.append(agent.opt_state)
-            experience.append(agent.experience)
             parameters[0].append(float(agent.learning_rate))
             parameters[1].append(int(agent.buffersize))
             parameters[2].append(int(agent.train_step))
             parameters[3].append(float(self.reward_shaper[i].penalty_last_of_kind))
             parameters[4].append(float(self.reward_shaper[i].min_play_probability))
-            parameters[5].append(float(self.reward_shaper[i].w_play_probability))        
+            parameters[5].append(float(self.reward_shaper[i].w_play_probability))  
+            if self.agent_params.use_priority:
+                values_sumtree = agent.experience.get_info()
+                buffer = agent.experience
+                buffer.sum_tree = None
+                experience.append((buffer, values_sumtree))
+            else:
+                experience.append(agent.experience)
+
 
         return {'online_weights' : online_weights, 'trg_weights' : trg_weights,
                 'opt_states' : opt_states, 'experience' : experience, 'parameters' : parameters}
@@ -424,14 +420,19 @@ class AgentDQNPopulation:
             print('Restoring agent no {}!'.format(i))
             agent.online_params = characteristics['online_weights'][i]
             agent.trg_params = characteristics['trg_weights'][i]
-            agent.opt_state = characteristics['opt_states'][i]      
-            agent.experience = characteristics['experience'][i]       
+            agent.opt_state = characteristics['opt_states'][i]            
             agent.learning_rate = characteristics['parameters'][0][i]
             agent.buffersize = characteristics['parameters'][1][i]
             agent.train_step = characteristics['parameters'][2][i]
             self.reward_shaper[i].penalty_last_of_kind = characteristics['parameters'][3][i]
             self.reward_shaper[i].min_play_probability = characteristics['parameters'][4][i]
             self.reward_shaper[i].w_play_probability = characteristics['parameters'][5][i]
+            if self.agent_params.use_priority:
+                agent.experience = characteristics['experience'][i][0]
+                agent.experience.restore_sumtree(characteristics['experience'][i][1]) 
+            else:
+                agent.experience = characteristics['experience'][i] 
+
             print('Agent_{} has lr {}, BufSiz {}, TrainStep {}, PenLastKind{}, MinPlayProb {}, wPlayProb {}'.format(i, 
                                                                                                                     agent.learning_rate, 
                                                                                                                     agent.buffersize, 
