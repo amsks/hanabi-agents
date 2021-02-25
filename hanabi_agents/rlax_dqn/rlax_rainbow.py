@@ -320,7 +320,7 @@ class DQNAgent:
                                                                   moves,
                                                                   self.train_step)
             return onp.array(shaped_rewards), onp.array(shape_type)
-        return (0, 0)
+        return (onp.zeros(len(observations[0])), onp.zeros(len(observations[0])))
 
     def update(self):
         """Make one training step.
