@@ -59,7 +59,6 @@ class PriorityBuffer(ExperienceBuffer):
             if self.capacity < new_size:
                 # buffer full
                 if self.size == self.capacity:
-                    self.oldest_entry = self.size
                     return 0, self.capacity, True
                 # buffer not filled yet
                 else:
@@ -73,6 +72,7 @@ class PriorityBuffer(ExperienceBuffer):
                         return (self.oldest_entry - new_size), self.oldest_entry, True
                     # most recent buffer entries are fragmented between bufferend and beginning
                     else:
+                        
                         return ((self.capacity - (new_size - self.oldest_entry)), self.capacity ), (0, self.oldest_entry), False
                 # buffer not yet full
                 else:
@@ -81,18 +81,22 @@ class PriorityBuffer(ExperienceBuffer):
                     else:
                         return 0, self.oldest_entry, True
 
+
         start_ind, end_ind, unfragmented = get_indices_old_obs(new_size)
         
         def ind_list(start_ind, end_ind, unfragmented):
             if unfragmented:
                 return list(range(start_ind, end_ind))
             else:
+                print('list from {} to {} and from {} to {}'.format(start_ind[0], start_ind[1], end_ind[0], end_ind[1]))
                 list_1 = list(range(start_ind[0], start_ind[1]))
                 list_2 = list(range(end_ind[0], end_ind[1]))
-                return list_1.extend(list_2)
+                list_1.extend(list_2)
+                return list_1
 
         sumtree_ind = ind_list(start_ind, end_ind, unfragmented)
         intermediate_sumtree = SumTree(new_size)
+
         prio_values = self.sum_tree.get_values(sumtree_ind)
         #new sum_tree indices
         new_indices = list(range(0, len(prio_values)))
@@ -111,6 +115,22 @@ class PriorityBuffer(ExperienceBuffer):
         sumT.update_values(list(range(0, self.capacity)), values)
         self.sum_tree = sumT
 
+
+
+#  @register_pytree_node_class
+#  class Transition:
+#      def __init__(self, obs_tm1, action_tm1, reward_tm1, obs_t):
+#          self.obs_tm1 = obs_tm1
+#          self.action_tm1 = action_tm1
+#          self.reward_tm1 = reward_tm1
+#          self.obs_t = obs_t
+#
+#      def tree_flatten(self):
+#          return ((self.obs_tm1, self.action_tm1, self.reward_tm1, self.obs_t), None)
+#
+#      @classmethod
+#      def tree_unflatten(cls, aux_data, children):
+#          return cls(*children)
 
 @register_pytree_node_class
 class TreeNode:

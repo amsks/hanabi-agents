@@ -53,6 +53,7 @@ class PBTParams(NamedTuple):
     generations: int = 3500
     saver_threshold: float = 13
     pool_path: str = 'pool'
+    use_db: bool = True
     db_path: str = 'obs.db'
     w_diversity: float = 10
     obs_no: int = 10000

@@ -17,6 +17,7 @@ import sqlite3
 import time
 from math import e
 import names
+from sklearn import metrics
 
 """
 ### Work in Progress###
@@ -65,7 +66,8 @@ class AgentDQNPopulation:
             env_act_size,
             population_params: PBTParams = PBTParams(),
             agent_params: RlaxRainbowParams = RlaxRainbowParams(),
-            reward_shaping_params: RewardShapingParams = RewardShapingParams()):
+            reward_shaping_params: RewardShapingParams = RewardShapingParams(),
+            eval_run = False):
 
         self.pbt_params = population_params
         self.agent_params = agent_params
@@ -85,8 +87,13 @@ class AgentDQNPopulation:
         self.evaluations = np.zeros((self.n_states,))
         self.prev_reward = 0
         self.pbt_counter = np.zeros(self.pop_size)
+        self.eval_run = eval_run
+        self.tmp_obs = []
+        self.pbt_history = []
+        self.pbt_history_params = []
 
         self.max_score = 15 #"""!!!!!!!!!!!!!!!!!!!!!!!!!"""
+
 
         self.reward_shaper = []
         for i in range(self.pop_size):
@@ -184,7 +191,8 @@ class AgentDQNPopulation:
             actions_rem = agent.exploit(obs_chunk)
             action_chunks.append(actions_rem)
         actions = np.concatenate(action_chunks, axis = 0)
-
+        if self.eval_run:
+            self.tmp_obs.append(observations)
         return actions
 
     # deprecated with new implementation for stacking
@@ -254,10 +262,19 @@ class AgentDQNPopulation:
         if not os.path.isdir(os.path.join(path, 'agents')):
             os.makedirs(os.path.join(path, 'agents'))
         """saves the weights of specific agents that meet a certain condition"""
-        agent_name = names.get_full_name().replace(' ', '_') + '_{}'.format(str(score).replace('.','_'))
-        self.agents[index].save_weights(os.path.join(path, 'agents'), agent_name)
-        path_npy = os.path.join(path, 'action_vecs/{}'.format(agent_name))
+        agent_name = names.get_full_name().replace(' ', '_') 
+        parameters_name = agent_name + '_lr_buf_alpha_w_play_disc'
+        weights_name = agent_name + '_{}'.format(str(score).replace('.','_'))
+        self.agents[index].save_weights(os.path.join(path, 'agents'), weights_name)
+        path_npy = os.path.join(path, 'action_vecs/{}'.format(agent_name + '_action_vector'))
         np.save(path_npy, act_vec)
+        np.save(os.path.join(path, 'agents/{}'.format(parameters_name)), np.asarray([self.agents[index].learning_rate, 
+                    self.agents[index].buffersize, 
+                    self.agents[index].experience.alpha,
+                    self.reward_shaper[index].w_play_probability,
+                    self.reward_shaper[index].min_play_probability,
+                    self.reward_shaper[index].penalty_last_of_kind]))
+
 
     def _choose_fittest(self, mean_reward):
         """Chosses the fittest agents after evaluation run and overwrites all the other agents with weights + permutation of lr + buffersize"""
@@ -291,7 +308,7 @@ class AgentDQNPopulation:
             obs = pickle.loads(query[0])
             return obs
     
-    def generate_action_vector(self, obs):
+    def generate_action_vectors(self, obs):
         action_vec = []
         agent_indices = np.where(self.readiness == True)[0].tolist()
         for elem in agent_indices:
@@ -310,9 +327,26 @@ class AgentDQNPopulation:
             action_vecs.append(np.load(os.path.join(vecs_path, file)))
         return action_vecs
 
-    def mutual_information(self, db_path):
-        obs = self._load_db(db_path)
-        actions_curr_agents, agent_indices = self.generate_action_vector(obs)
+    @staticmethod
+    def cosine_distance(actions_agent_a, actions_agent_b, no_obs):
+        pass
+
+    
+    def mutual_information(self, actions_agent_a, actions_agent_b, no_obs):
+        '''Compares both vectors by calculating the mutual information'''
+        return 1 - metrics.normalized_mutual_info_score(actions_agent_a, actions_agent_b)
+
+    @staticmethod
+    def simple_match(actions_agent_a, actions_agent_b, no_obs):
+        '''Compares both action vectors and calculates the number of matching actions'''
+        return (1 - np.sum(actions_agent_a == actions_agent_b)/no_obs)
+
+    def measure_diversity(self, db_path, function = mutual_information):
+        if self.pbt_params.use_db:
+            obs = self._load_db(db_path)
+        else:
+            obs = np.concatenate(self.tmp_obs)
+        actions_curr_agents, agent_indices = self.generate_action_vectors(obs)
         actions_exis_agents = self.load_existing_agents()
         actions_curr_agents.extend(actions_exis_agents)
         combined = actions_curr_agents
@@ -320,15 +354,13 @@ class AgentDQNPopulation:
         diversity_matrix = [[] for i in range(len(combined))]
         for i, elem in enumerate(combined):
             for vec in combined:
-                mut_info = (1 - np.sum(elem == vec)/no_obs)
+                mut_info = self.mutual_information(elem, vec, no_obs)
                 diversity_matrix[i].append(mut_info)
         diversity_matrix = np.asarray(diversity_matrix)
         np.fill_diagonal(diversity_matrix, 1)
         print('Diversity matrix equals: \n {}'.format(diversity_matrix))
         return diversity_matrix, actions_curr_agents
 
-    def cosine_distance(self):
-        pass
 
     def quantify_diversity(self, diversity_mat, mean_reward):
         minima = np.min(diversity_mat, axis = 1)
@@ -338,16 +370,39 @@ class AgentDQNPopulation:
         mean_reward[self.readiness] = mean_reward[self.readiness] + 1/(1 + e**-(mean_reward[self.readiness] - 2/3*self.max_score)) * self.pbt_params.w_diversity * minima[:np.sum(self.readiness)]
         return mean_reward
     
+    def pbt_log(self, index_overwriting, index_overwritten):
+        if not self.pbt_history:
+            new_row = list(range(self.pop_size))
+        else:
+            new_row = self.pbt_history[-1][0].copy()
+        which = [False for i in range(self.pop_size)]
+        for i, index in enumerate(index_overwritten):
+            new_row[index] = index_overwriting[i]
+            which[index] = True
+        self.pbt_history.append([new_row, which])
+
+    def pbt_log_params(self):
+        new_row = []
+        new_agent = []
+        for i, agent in enumerate(self.agents):
+            new_agent.append(agent.learning_rate)
+            new_agent.append(agent.buffersize)
+            new_agent.append(agent.experience.alpha)
+            new_agent.append(self.reward_shaper[i].penalty_last_of_kind)
+            new_agent.append(self.reward_shaper[i].w_play_probability)
+            new_agent.append(self.reward_shaper[i].min_play_probability)
+            new_row.append(new_agent)
+        self.pbt_history_params.append(new_row)
+
 
     def pbt_eval(self, mean_reward, output_dir):
         """Copies the network weights from those agents considered survivors over to those not considered and samples new
             parameters for those overwritten (learning rate / buffersize)"""
         self.readiness = self.pbt_counter >= self.pbt_params.life_span
         print('Mean reward without Diversity: {}'.format(mean_reward))
-        diversity_matrix, action_vectors = self.mutual_information( self.pbt_params.db_path)
+        diversity_matrix, action_vectors = self.measure_diversity( self.pbt_params.db_path)
         mean_reward_div = self.quantify_diversity(diversity_matrix, mean_reward)
         print('Mean reward + Diversity measure is {}'.format(mean_reward_div))
-
         if np.max(mean_reward_div[self.readiness]) >= self.pbt_params.saver_threshold:
             print('XXXXXXXXXXXXXXXXXXXXXXXXXXXX SAVING A NEW AGENT XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX')
             index_max = np.where(self.readiness == 1)[0][np.argmax(mean_reward_div[self.readiness])]
@@ -355,12 +410,17 @@ class AgentDQNPopulation:
             self.save_specific_agent(self.pbt_params.pool_path, index_max, action_vectors[np.argmax(mean_reward_div[self.readiness])], score)
 
         index_survivor, index_losers = self._choose_fittest(mean_reward_div)
-
         survivor_attributes = []
+        survivor_dominant = []
         for survivor in index_survivor:
+            survivor_dominant.append(random.choice(list(range(len(index_survivor)))))
             survivor_attributes.append(self.agents[survivor].get_agent_attributes())
-        for loser in index_losers:
-            winner = random.choice(survivor_attributes)
+        index_dominant = []
+        for elem in survivor_dominant:
+            index_dominant.append(index_survivor[elem])
+        self.pbt_log(index_dominant, index_losers)
+        for i, loser in enumerate(index_losers):
+            winner = survivor_attributes[survivor_dominant[i]]
             self.agents[loser].overwrite_weights(winner[2])
             if self.pbt_params.change_learning_rate:
                 self.agents[loser].overwrite_lr(self.pbt_params.lr_factor, winner[0])
@@ -372,19 +432,29 @@ class AgentDQNPopulation:
                     self.reward_shaper[loser].change_min_play_prob(new_val)
                 if self.pbt_params.change_w_play_probability:
                     new_val = random.choice([-self.pbt_params.w_play_probability_pbt, 0, self.pbt_params.w_play_probability_pbt])
-                    self.reward_shaper[loser].change_w_play_probability(new_val)
-                    
+                    self.reward_shaper[loser].change_w_play_probability(new_val)                 
                 if self.pbt_params.change_penalty_last_of_kind:
                     new_val = random.choice([-self.pbt_params.penalty_last_of_kind_pbt, 0, self.pbt_params.penalty_last_of_kind_pbt])
                     self.reward_shaper[loser].change_penalty_last_kind(new_val)
                 
             self.pbt_counter[loser] = 0
+        self.pbt_log_params()
+
         # agents_status(self.agents)
         print('Update current epochs per agent {}'.format(self.pbt_counter))
         time.sleep(10)
 
-    def save_pbt_log(self):
-        pass
+    def save_pbt_log(self, path, epoch_circle):
+        path = os.path.join(path, 'pbt_log_data')
+        if not os.path.isdir(path):
+            os.makedirs(path)
+        print('before saving', self.pbt_history)
+        pbt_name = path + 'pbt_history_generation_{}'.format(epoch_circle)
+        path_pbt_hist = path + 'pbt_params_history_generation_{}'.format(epoch_circle)
+        a = np.asarray(self.pbt_history)
+        b = np.asarray(self.pbt_history_params)
+        np.save(pbt_name, a)
+        np.save(path_pbt_hist, b)
 
 
     def save_characteristics(self):
