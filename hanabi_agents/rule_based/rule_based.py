@@ -6,11 +6,11 @@ import numpy as np
 
 class RulebasedAgent():
 
-    def __init__(self, rules, reward_shaper):
+    def __init__(self, rules):
         self.rules = rules
         self.totalCalls = 0
         self.histogram = [0 for i in range(len(rules)+1)]
-        self.reward_shaper = reward_shaper
+        self.reward_shaper = None
 
 
     def get_move(self, observation):
@@ -43,13 +43,8 @@ class RulebasedAgent():
 
     def update(self):
         pass
-    
-    def shape_rewards(self, observations, moves):
-        if self.reward_shaper is not None:
-            shaped_rewards, shape_type = self.reward_shaper.shape(observations, 
-                                                                  moves)
-            return np.array(shaped_rewards), np.array(shape_type)
 
+    def shape_rewards(self, observations, moves):
         return (np.zeros((len(observations), )), np.zeros((len(observations),)))
     
     def create_stacker(self, obs_len, n_states):
@@ -57,3 +52,5 @@ class RulebasedAgent():
 
     def save_weights(self, a, b):
         pass
+    
+    
