@@ -270,11 +270,11 @@ class DQNLearning:
         grad_fn = jax.grad(loss, has_aux=True)
         grads, new_prios = grad_fn(
             online_params, trg_params,
-            transitions.observation_tm1,
-            transitions.action_tm1[:, 0],
-            transitions.reward_t[:, 0],
-            transitions.observation_t,
-            transitions.terminal_t,
+            transitions["observation_tm1"],
+            transitions["action_tm1"][:, 0],
+            transitions["reward_t"][:, 0],
+            transitions["observation_t"],
+            transitions["terminal_t"],
             discount_t,
             prios
         )
@@ -302,6 +302,8 @@ class DQNAgent:
         self.params = params
         self.reward_shaper = reward_shaper
         self.rng = hk.PRNGSequence(jax.random.PRNGKey(params.seed))
+        self.drawn_priorities = []
+        self.n_network = 2
 
         # Function to build and initialize Q-network. Use Noisy Network or MLP
         def build_network(
@@ -315,7 +317,7 @@ class DQNAgent:
                 return hk.Reshape(output_shape=output_shape)(network(obs))
 
             return hk.transform(q_net)
-        
+                
         # define shape of output layer
         if self.params.use_distribution:
             output_shape = (action_spec.num_values, params.n_atoms)
@@ -329,14 +331,18 @@ class DQNAgent:
             params.use_noisy_network # network type
         )
         
-        # initialize the network -> returns initial set of weights
-        self.trg_params = self.network.init(
-            next(self.rng), 
-            onp.zeros(
-                (observation_spec.shape[0], observation_spec.shape[1] * self.params.history_size), 
-                dtype = onp.float16
-            )
+        # input vector of wanted shape filled with zeros
+        input_placeholder = onp.zeros(
+            (observation_spec.shape[0], observation_spec.shape[1] * self.params.history_size),
+            dtype = onp.float16
         )
+        
+        # keys list
+        keys = jnp.array([next(self.rng) for _ in range(self.n_network)])
+        # initialize networks
+        parallel_network_init = jax.vmap(self.network.init, in_axes=(0, None))
+        self.trg_params = parallel_network_init(keys, input_placeholder)
+        
         self.online_params = self.trg_params
         
         # create atoms for distributional network
@@ -347,7 +353,10 @@ class DQNAgent:
 
         # Build and initialize Adam optimizer.
         self.optimizer = optax.adam(params.learning_rate, eps=3.125e-5)
-        self.opt_state = self.optimizer.init(self.online_params)
+        parallel_opt_init = jax.vmap(self.optimizer.init, in_axes=(0,))
+        self.opt_state = parallel_opt_init(self.online_params)
+        
+        #self.opt_state = self.optimizer.init(self.online_params)
         self.train_step = 0
         
         # Define the update function
@@ -355,39 +364,50 @@ class DQNAgent:
 
         # Create Buffer (Priority Buffer or Experience Buffer)
         if params.use_priority:
-            self.experience = PriorityBuffer(
-                observation_spec.shape[1] * self.params.history_size, 
-                action_spec.num_values, 
-                1,
-                params.experience_buffer_size,
-                alpha=self.params.priority_w
-            )
+            self.experience = [
+                PriorityBuffer(observation_spec.shape[1] * self.params.history_size, 
+                               action_spec.num_values, 
+                               1,
+                               params.experience_buffer_size,
+                               alpha=self.params.priority_w) 
+                for _ in range(self.n_network)
+            ]
         else:
-            self.experience = ExperienceBuffer(
-                observation_spec.shape[1] * self.params.history_size,
-                action_spec.num_values,
-                1,
-                params.experience_buffer_size
-            )
+            self.experience = [
+                ExperienceBuffer(observation_spec.shape[1] * self.params.history_size,
+                                 action_spec.num_values,
+                                 1,
+                                 params.experience_buffer_size)
+                for _ in range(self.n_network)
+            ]
            
         self.requires_vectorized_observation = lambda: True
 
     def exploit(self, observations):
         observations, legal_actions = observations[1]
-        actions = DQNPolicy.eval_policy(
-            self.network, self.params.use_distribution, #static arguments
-            self.atoms, self.online_params, next(self.rng), observations, legal_actions
-        )
-        return jax.tree_util.tree_map(onp.array, actions)
+        
+        obs = observations.reshape(self.n_network, -1, observations.shape[1])
+        vla = legal_actions.reshape(self.n_network, -1, legal_actions.shape[1])
+        keys = jnp.array([next(self.rng) for _ in range(self.n_network)])
+        
+        parallel_eval = jax.vmap(DQNPolicy.eval_policy, in_axes=(None, None, None, 0, 0, 0, 0))
+        actions = parallel_eval(self.network, self.params.use_distribution, self.atoms, 
+                                self.online_params, keys, obs, vla)
+        
+        return jax.tree_util.tree_map(onp.array, actions).flatten()
 
     def explore(self, observations):
         observations, legal_actions = observations[1]
-        _, actions = DQNPolicy.policy(
-            self.network, self.params.use_distribution, #static arguments
-            self.atoms, self.online_params, self.params.epsilon(self.train_step), next(self.rng),
-            observations, legal_actions
-        )
-        return jax.tree_util.tree_map(onp.array, actions)
+        
+        obs = observations.reshape(self.n_network, -1, observations.shape[1])
+        vla = legal_actions.reshape(self.n_network, -1, legal_actions.shape[1])
+        keys = jnp.array([next(self.rng) for _ in range(self.n_network)])
+        
+        parallel_eval = jax.vmap(DQNPolicy.policy, in_axes=(None, None, None, 0, None, 0, 0, 0))
+        _, actions = parallel_eval(self.network, self.params.use_distribution, self.atoms,
+                                self.online_params, self.params.epsilon(self.train_step), keys, obs, vla)
+        
+        return jax.tree_util.tree_map(onp.array, actions).flatten()
     
     def add_experience_first(self, observations, step_types):
         pass
@@ -397,14 +417,24 @@ class DQNAgent:
         obs_vec_tm1 = observations_tm1[1][0]
         obs_vec_t = observations_t[1][0]
         legal_actions_t = observations_t[1][1]
-
-        self.experience.add_transitions(
-            obs_vec_tm1,
-            actions_tm1.reshape(-1,1),
-            rewards_t,
-            obs_vec_t,
-            legal_actions_t,
-            term_t)
+        
+        # reshape input
+        obs_vec_tm1 = obs_vec_tm1.reshape(self.n_network, -1 , obs_vec_tm1.shape[1])
+        obs_vec_t = obs_vec_t.reshape(self.n_network, -1 , obs_vec_t.shape[1])
+        legal_actions_t = legal_actions_t.reshape(self.n_network, -1 , legal_actions_t.shape[1])
+        actions_tm1 = actions_tm1.reshape(self.n_network, -1, 1)
+        rewards_t = rewards_t.reshape(self.n_network, -1, 1)
+        term_t = term_t.reshape(self.n_network, -1, 1)
+        
+        for i in range(self.n_network):
+            self.experience[i].add_transitions(
+                obs_vec_tm1[i],
+                actions_tm1[i],
+                rewards_t[i],
+                obs_vec_t[i],
+                legal_actions_t[i],
+                term_t[i]
+            )
         
     def shape_rewards(self, observations, moves):
         
@@ -419,16 +449,30 @@ class DQNAgent:
         """Make one training step.
         """
         
+        def sample(experience):
+            if self.params.use_priority:
+                sample_indices, prios, transitions = experience.sample_batch(self.params.train_batch_size)
+                return sample_indices, prios, transitions
+            else:
+                transitions = experience.sample(self.params.train_batch_size)
+                prios = onp.ones(transitions.observation_tm1.shape[0])
+                return _, prios, transitions
+            
+        def combine_dict(lst_dict):
+            dict_out = {}
+            for keys in lst_dict[0]:
+                dict_out[keys] = onp.array([d[keys] for d in lst_dict])
+            return dict_out
+
         if not self.params.fixed_weights:
 
-            if self.params.use_priority:
-                sample_indices, prios, transitions = self.experience.sample_batch(
-                    self.params.train_batch_size)
-            else:
-                transitions = self.experience.sample(self.params.train_batch_size)
-                prios = onp.ones(transitions.observation_tm1.shape[0])
-    
-            self.online_params, self.opt_state, tds = self.update_q(
+            sample_indices, prios, transitions = zip(*[sample(e) for e in self.experience])
+            transitions = combine_dict(transitions)
+                
+            parallel_update = jax.vmap(self.update_q, in_axes=(None, None, None, 0, 0, 0, 
+                                                               0, None, 0, None, None, None))
+            
+            self.online_params, self.opt_state, tds = parallel_update(
                 self.network,
                 self.atoms,
                 self.optimizer,
@@ -437,13 +481,14 @@ class DQNAgent:
                 self.opt_state,
                 transitions,
                 self.params.discount,
-                prios,
+                onp.array(prios),
                 self.params.beta_is(self.train_step),
                 self.params.use_double_q,
                 self.params.use_distribution)
-    
+            
             if self.params.use_priority:
-                self.experience.update_priorities(sample_indices, onp.abs(tds))
+                for i in range(self.n_network):
+                    self.experience[i].update_priorities(sample_indices[i], onp.abs(tds[i]))
     
             if self.train_step % self.params.target_update_period == 0:
                 self.trg_params = self.online_params
@@ -457,20 +502,21 @@ class DQNAgent:
 
     def __repr__(self):
         return f"<rlax_dqn.DQNAgent(params={self.params})>"
-
-    def save_weights(self, path, fname_part):
+    
+    def save_weights(self, path, fname_part, only_weights=True):
         """Save online and target network weights to the specified path
         added: save optimizer state"""
-
-        # TODO save weights using something other than pickle (e.g. numpy + protobuf)
+        
         with open(join_path(path, "rlax_rainbow_" + fname_part + "_online.pkl"), 'wb') as of:
             pickle.dump(self.online_params, of)
         with open(join_path(path, "rlax_rainbow_" + fname_part + "_target.pkl"), 'wb') as of:
             pickle.dump(self.trg_params, of)
-        with open(join_path(path, "rlax_rainbow_" + fname_part + "_opt_state.pkl"), 'wb') as of:
-            pickle.dump(jax.tree_util.tree_map(onp.array, self.opt_state), of)
-        with open(join_path(path, "rlax_rainbow_" + fname_part + "_experience.pkl"), 'wb') as of:
-            pickle.dump(self.experience.serializable(), of)
+            
+        if not only_weights:
+            with open(join_path(path, "rlax_rainbow_" + fname_part + "_opt_state.pkl"), 'wb') as of:
+                pickle.dump(jax.tree_util.tree_map(onp.array, self.opt_state), of)
+            with open(join_path(path, "rlax_rainbow_" + fname_part + "_experience.pkl"), 'wb') as of:
+                pickle.dump([e.serializable() for e in self.experience], of)
     
     # older versions of haiku store weights as frozendict, convert to mutable dict and then to FlatMapping
     def _compat_restore_weights(self, file_w):
@@ -498,5 +544,29 @@ class DQNAgent:
         # experience buffer
         if experience_file is not None:
             with open(experience_file, 'rb') as iwf:
-                self.experience.load(pickle.load(iwf))
-        
+                for i, serialized in enumerate(pickle.load(iwf)):
+                    self.experience[i].load(serialized)
+                
+#     def get_buffer_priorities(self):
+#         if self.params.use_priority:
+#             index_list = range(self.experience.size)
+#             return self.experience.get_priorities(index_list)
+#         else:
+#             return None
+#         
+#     def get_drawn_priorities(self, reset=True):
+#         prios = self.drawn_priorities.copy()
+#         self.drawn_priorities.clear()
+#         return prios
+#     
+#     def get_stochasticity(self):
+#         
+#         def process_weights(w):
+#             return onp.mean(onp.abs(w['w_sigma']))
+#         
+#         if self.params.use_noisy_network:
+#             weights = hk.data_structures.to_mutable_dict(self.online_params)
+#             return [process_weights(w) for w in weights.values()]
+#         else:
+#             return None
+

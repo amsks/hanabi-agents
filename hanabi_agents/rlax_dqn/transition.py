@@ -7,8 +7,18 @@ Transition from state A to state B includes
   -- legal_moves_t   - legal moves for observation_t
   -- terminal_t      - whether the transition is terminal.
 """
-from collections import namedtuple
+#from collections import namedtuple
 
-Transition = namedtuple(
-    "Transition",
-    ["observation_tm1", "action_tm1", "reward_t", "observation_t", "legal_moves_t", "terminal_t"])
+# Transition = namedtuple(
+#     "Transition",
+#     ["observation_tm1", "action_tm1", "reward_t", "observation_t", "legal_moves_t", "terminal_t"])
+
+def Transition(obs_tm1, action_tm1, reward_t, obs_t, legal_moves_t, terminal_t):
+    return {
+        "observation_tm1": obs_tm1,
+        "action_tm1": action_tm1,
+        "reward_t": reward_t,
+        "observation_t": obs_t,
+        "legal_moves_t": legal_moves_t,
+        "terminal_t": terminal_t
+    }
