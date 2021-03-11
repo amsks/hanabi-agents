@@ -303,7 +303,7 @@ class DQNAgent:
         self.reward_shaper = reward_shaper
         self.rng = hk.PRNGSequence(jax.random.PRNGKey(params.seed))
         self.drawn_priorities = []
-        self.n_network = 2
+        self.n_network = params.n_network
 
         # Function to build and initialize Q-network. Use Noisy Network or MLP
         def build_network(
