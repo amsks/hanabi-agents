@@ -6,6 +6,7 @@ import pickle
 from functools import partial
 from typing import Tuple, List
 from os.path import join as join_path
+import timeit
 
 import numpy as onp
 
@@ -470,6 +471,7 @@ class DQNAgent:
         if not self.params.fixed_weights:
 
             sample_indices, prios, transitions = zip(*map(sample, self.experience))
+            print('sample', timeit.timeit(lambda: zip(*map(sample, self.experience)), number=100))
             transitions = combine_dict(transitions)
                 
             parallel_update = jax.vmap(self.update_q, in_axes=(None, None, None, 0, 0, 0, 
@@ -490,6 +492,7 @@ class DQNAgent:
                 self.params.use_distribution)
             
             if self.params.use_priority:
+                print('update', timeit.timeit(lambda: self.experience[0].update_priorities(sample_indices[0], onp.abs(tds[0])), number=300))
                 for i in range(self.n_network):
                     self.experience[i].update_priorities(sample_indices[i], onp.abs(tds[i]))
     
