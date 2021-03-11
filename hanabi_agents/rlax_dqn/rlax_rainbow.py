@@ -313,7 +313,10 @@ class DQNAgent:
 
             def q_net(obs):
                 layers_ = tuple(layers) + (onp.prod(output_shape), )
-                network = NoisyMLP(layers_) if use_noisy_network else hk.nets.MLP(layers_)
+                if use_noisy_network:
+                    network = NoisyMLP(layers_, factorized_noise=self.params.factorized_noise) 
+                else:
+                    network = hk.nets.MLP(layers_)
                 return hk.Reshape(output_shape=output_shape)(network(obs))
 
             return hk.transform(q_net)

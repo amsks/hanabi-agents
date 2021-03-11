@@ -24,6 +24,7 @@ class RlaxRainbowParams(NamedTuple):
     history_size: int = 1
     fixed_weights: bool = False
     n_network: int = 1 # number of networks trained in parallel
+    factorized_noise: bool = False
     
 @gin.configurable
 class RewardShapingParams(NamedTuple):
