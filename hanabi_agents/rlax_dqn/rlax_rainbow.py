@@ -491,10 +491,14 @@ class DQNAgent:
                 self.params.use_double_q,
                 self.params.use_distribution)
             
+            def update_priorities(buffer, indices, tds):
+                buffer.update_priorities(indices, tds)
+            
             if self.params.use_priority:
-                print('update', timeit.timeit(lambda: self.experience[0].update_priorities(sample_indices[0], onp.abs(tds[0])), number=300))
-                for i in range(self.n_network):
-                    self.experience[i].update_priorities(sample_indices[i], onp.abs(tds[i]))
+                print('update', timeit.timeit(lambda: map(update_priorities, self.experience, sample_indices, onp.abs(tds)), number=100))
+                #for i in range(self.n_network):
+                #   self.experience[i].update_priorities(sample_indices[i], onp.abs(tds[i]))
+                map(update_priorities, self.experience, sample_indices, onp.abs(tds))
     
             if self.train_step % self.params.target_update_period == 0:
                 self.trg_params = self.online_params
