@@ -458,7 +458,7 @@ class DQNAgent:
                 return sample_indices, prios, transitions
             else:
                 transitions = experience.sample(self.params.train_batch_size)
-                prios = onp.ones(transitions.observation_tm1.shape[0])
+                prios = onp.ones(transitions["observation_tm1"].shape[0])
                 return _, prios, transitions
             
         def combine_dict(lst_dict):
@@ -469,7 +469,7 @@ class DQNAgent:
 
         if not self.params.fixed_weights:
 
-            sample_indices, prios, transitions = zip(*[sample(e) for e in self.experience])
+            sample_indices, prios, transitions = zip(*map(sample, self.experience))
             transitions = combine_dict(transitions)
                 
             parallel_update = jax.vmap(self.update_q, in_axes=(None, None, None, 0, 0, 0, 
