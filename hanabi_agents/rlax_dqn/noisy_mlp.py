@@ -136,6 +136,7 @@ class NoisyMLP(hk.Module):
     self.b_sigma_init = b_sigma_init
     self.activation = activation
     self.activate_final = activate_final
+    self.factorized = factorized_noise
     layers = []
     for index, output_size in enumerate(output_sizes):
       key, self.rng = jax.random.split(self.rng)
@@ -149,8 +150,8 @@ class NoisyMLP(hk.Module):
                               w_sigma_init=w_sigma_init,
                               b_sigma_init=b_sigma_init,
                               with_bias=with_bias,
-                              name="noisy_linear_%d" % index),
-                              factorized_noise=factorized_noise)
+                              name="noisy_linear_%d" % index,
+                              factorized_noise=self.factorized))
     self.layers = tuple(layers)
 
   def __call__(
@@ -230,4 +231,5 @@ class NoisyMLP(hk.Module):
         activation=self.activation,
         activate_final=activate_final,
         name=name,
-        seed=self.seed)
+        seed=self.seed,
+        factorized_noise=self.factorized)
