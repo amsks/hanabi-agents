@@ -471,7 +471,7 @@ class DQNAgent:
         if not self.params.fixed_weights:
 
             sample_indices, prios, transitions = zip(*map(sample, self.experience))
-            print('sample', timeit.timeit(lambda: zip(*map(sample, self.experience)), number=100))
+            #print('sample', timeit.timeit(lambda: zip(*map(sample, self.experience)), number=100))
             transitions = combine_dict(transitions)
                 
             parallel_update = jax.vmap(self.update_q, in_axes=(None, None, None, 0, 0, 0, 
@@ -495,7 +495,7 @@ class DQNAgent:
                 buffer.update_priorities(indices, tds)
             
             if self.params.use_priority:
-                print('update', timeit.timeit(lambda: map(update_priorities, self.experience, sample_indices, onp.abs(tds)), number=100))
+                #print('update', timeit.timeit(lambda: map(update_priorities, self.experience, sample_indices, onp.abs(tds)), number=100))
                 #for i in range(self.n_network):
                 #   self.experience[i].update_priorities(sample_indices[i], onp.abs(tds[i]))
                 map(update_priorities, self.experience, sample_indices, onp.abs(tds))
