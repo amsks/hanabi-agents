@@ -459,7 +459,7 @@ class DQNAgent:
             else:
                 transitions = experience.sample(self.params.train_batch_size)
                 prios = onp.ones(transitions["observation_tm1"].shape[0])
-                return _, prios, transitions
+                return None, prios, transitions
             
         def combine_dict(lst_dict):
             dict_out = {}
