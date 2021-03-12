@@ -98,7 +98,7 @@ class ExperienceBuffer:
         return (
             self[indices],
             indices,
-            np.ones((self.n_network, self.params.train_batch_size)) # prios
+            np.ones((self.n_network, batch_size)) # prios
         ) 
     
     def serializable(self):      
