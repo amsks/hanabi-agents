@@ -51,7 +51,7 @@ class PriorityBuffer(ExperienceBuffer):
     def update_priorities(self, indices, priorities):
         
         #priorities = (priorities + 1e-10) ** self.alpha
-        #priorities = np.sqrt((priorities + 1e-10))
+        priorities = np.sqrt((priorities + 1e-10))
         self.max_priority = np.maximum(self.max_priority, np.amax(priorities, axis=1))
         self.min_priority = np.minimum(self.min_priority, np.amin(priorities, axis=1))
         
