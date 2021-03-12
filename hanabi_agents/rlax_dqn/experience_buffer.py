@@ -79,10 +79,27 @@ class ExperienceBuffer:
             self.terminal_t_buf[:, :tail, :] = terminal_t[-tail:]
             self.next_entry = tail
             self.size = self.capacity
+            
+            
+    def __getitem__(self, indices):
+        
+        def get_from_buffer(buf):
+            return np.array([b[idx] for b, idx in zip(buf, indices)])
+        
+        samples = map(
+            get_from_buffer, 
+            [self.obs_tm1_buf, self.act_tm1_buf, self.rew_t_buf, self.obs_t_buf, self.terminal_t_buf]
+        )
+        
+        return Transition(*samples)
     
-    def sample_index(self, batch_size):
-        return (np.random.choice(self.sample_range[:self.size], size=(self.n_network, batch_size)), # indices
-                onp.ones((self.n_network, self.params.train_batch_size))) # prios
+    def sample(self, batch_size):
+        indices = np.random.choice(self.sample_range[:self.size], size=(self.n_network, batch_size))
+        return (
+            self[indices],
+            indices,
+            onp.ones((self.n_network, self.params.train_batch_size)) # prios
+        ) 
     
     def serializable(self):      
         lst_serialize = [self.obs_tm1_buf, 

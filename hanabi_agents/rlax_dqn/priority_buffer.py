@@ -35,7 +35,7 @@ class PriorityBuffer(ExperienceBuffer):
             observation_tm1, action_tm1, reward_t, observation_t, terminal_t
         )
         
-    def sample_index(self, batch_size):
+    def sample(self, batch_size):
         
         step_size = 1 / batch_size
         keys = np.broadcast_to(np.linspace(step_size, 1, batch_size), (self.n_network, batch_size))
@@ -45,7 +45,8 @@ class PriorityBuffer(ExperienceBuffer):
         tree_root_value = 1 / np.array([tree.get_total_val() for tree in self.sum_tree])
         prios = np.array([tree.get_values(indices[i]) for i, tree in enumerate(self.sum_tree)])
         prios = (prios + 1e-10) * tree_root_value[:, np.newaxis]
-        return indices, prios
+        
+        return self[indices], indices, prios
 
     def update_priorities(self, indices, priorities):
         

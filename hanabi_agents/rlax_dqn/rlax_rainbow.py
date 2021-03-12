@@ -441,9 +441,7 @@ class DQNAgent:
         
         if not self.params.fixed_weights:
             
-            parallel_sample = jax.vmap(sample_from_buffer, in_axes=(0,0))   
-            sample_indices, prios = self.buffer.sample_index(self.params.train_batch_size)      
-            transitions = parallel_sample(self.buffer.buffer_state(), sample_indices)
+            transitions, sample_indices, prios = self.buffer.sample(self.params.train_batch_size)      
             
             parallel_update = jax.vmap(self.update_q, in_axes=(None, None, None, 0, 0, 0, 
                                                                0, None, 0, None, None, None))
