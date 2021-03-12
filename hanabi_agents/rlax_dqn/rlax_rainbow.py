@@ -17,7 +17,7 @@ import jax.numpy as jnp
 import rlax
 import chex
 
-from .experience_buffer import ExperienceBuffer
+from .experience_buffer import ExperienceBuffer, sample_from_buffer
 from .priority_buffer import PriorityBuffer
 from .noisy_mlp import NoisyMLP
 from .params import RlaxRainbowParams
@@ -368,23 +368,19 @@ class DQNAgent:
 
         # Create Buffer (Priority Buffer or Experience Buffer)
         if params.use_priority:
-            self.experience = [
-                PriorityBuffer(observation_spec.shape[1] * self.params.history_size, 
-                               action_spec.num_values, 
-                               1,
-                               params.experience_buffer_size,
-                               alpha=self.params.priority_w) 
-                for _ in range(self.n_network)
-            ]
+            self.buffer = PriorityBuffer(
+                params.experience_buffer_size,
+                observation_spec.shape[1] * self.params.history_size,
+                params.n_network,
+                self.params.priority_w
+            )
         else:
-            self.experience = [
-                ExperienceBuffer(observation_spec.shape[1] * self.params.history_size,
-                                 action_spec.num_values,
-                                 1,
-                                 params.experience_buffer_size)
-                for _ in range(self.n_network)
-            ]
-           
+            self.buffer = ExperienceBuffer(
+                params.experience_buffer_size,
+                observation_spec.shape[1] * self.params.history_size,
+                params.n_network
+            )
+            
         self.requires_vectorized_observation = lambda: True
 
     def exploit(self, observations):
@@ -420,25 +416,15 @@ class DQNAgent:
 
         obs_vec_tm1 = observations_tm1[1][0]
         obs_vec_t = observations_t[1][0]
-        legal_actions_t = observations_t[1][1]
         
         # reshape input
         obs_vec_tm1 = obs_vec_tm1.reshape(self.n_network, -1 , obs_vec_tm1.shape[1])
         obs_vec_t = obs_vec_t.reshape(self.n_network, -1 , obs_vec_t.shape[1])
-        legal_actions_t = legal_actions_t.reshape(self.n_network, -1 , legal_actions_t.shape[1])
         actions_tm1 = actions_tm1.reshape(self.n_network, -1, 1)
         rewards_t = rewards_t.reshape(self.n_network, -1, 1)
         term_t = term_t.reshape(self.n_network, -1, 1)
         
-        for i in range(self.n_network):
-            self.experience[i].add_transitions(
-                obs_vec_tm1[i],
-                actions_tm1[i],
-                rewards_t[i],
-                obs_vec_t[i],
-                legal_actions_t[i],
-                term_t[i]
-            )
+        self.buffer.add(obs_vec_tm1, actions_tm1, rewards_t, obs_vec_t, term_t)
         
     def shape_rewards(self, observations, moves):
         
@@ -453,27 +439,12 @@ class DQNAgent:
         """Make one training step.
         """
         
-        def sample(experience):
-            if self.params.use_priority:
-                sample_indices, prios, transitions = experience.sample_batch(self.params.train_batch_size)
-                return sample_indices, prios, transitions
-            else:
-                transitions = experience.sample(self.params.train_batch_size)
-                prios = onp.ones(transitions["observation_tm1"].shape[0])
-                return None, prios, transitions
-            
-        def combine_dict(lst_dict):
-            dict_out = {}
-            for keys in lst_dict[0]:
-                dict_out[keys] = onp.array([d[keys] for d in lst_dict])
-            return dict_out
-
         if not self.params.fixed_weights:
-
-            sample_indices, prios, transitions = zip(*map(sample, self.experience))
-            #print('sample', timeit.timeit(lambda: zip(*map(sample, self.experience)), number=100))
-            transitions = combine_dict(transitions)
-                
+            
+            parallel_sample = jax.vmap(sample_from_buffer, in_axes=(0,0))   
+            sample_indices, prios = self.buffer.sample_index(self.params.train_batch_size)      
+            transitions = parallel_sample(self.buffer.buffer_state(), sample_indices)
+            
             parallel_update = jax.vmap(self.update_q, in_axes=(None, None, None, 0, 0, 0, 
                                                                0, None, 0, None, None, None))
             
@@ -490,16 +461,10 @@ class DQNAgent:
                 self.params.beta_is(self.train_step),
                 self.params.use_double_q,
                 self.params.use_distribution)
-            
-            def update_priorities(buffer, indices, tds):
-                buffer.update_priorities(indices, tds)
-            
+                        
             if self.params.use_priority:
-                #print('update', timeit.timeit(lambda: map(update_priorities, self.experience, sample_indices, onp.abs(tds)), number=100))
-                #for i in range(self.n_network):
-                #   self.experience[i].update_priorities(sample_indices[i], onp.abs(tds[i]))
-                map(update_priorities, self.experience, sample_indices, onp.abs(tds))
-    
+                self.buffer.update_priorities(sample_indices, onp.abs(tds))
+
             if self.train_step % self.params.target_update_period == 0:
                 self.trg_params = self.online_params
     

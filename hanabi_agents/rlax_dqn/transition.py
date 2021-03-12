@@ -13,12 +13,11 @@ Transition from state A to state B includes
 #     "Transition",
 #     ["observation_tm1", "action_tm1", "reward_t", "observation_t", "legal_moves_t", "terminal_t"])
 
-def Transition(obs_tm1, action_tm1, reward_t, obs_t, legal_moves_t, terminal_t):
+def Transition(obs_tm1, action_tm1, reward_t, obs_t, terminal_t):
     return {
         "observation_tm1": obs_tm1,
         "action_tm1": action_tm1,
         "reward_t": reward_t,
         "observation_t": obs_t,
-        "legal_moves_t": legal_moves_t,
         "terminal_t": terminal_t
     }
