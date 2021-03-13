@@ -9,11 +9,12 @@ class PriorityBuffer(ExperienceBuffer):
     def __init__(self, capacity: int, obs_len: int, n_network: int, alpha: int = 0.6):
 
         super(PriorityBuffer, self).__init__(capacity, obs_len, n_network)
+        self.td_buf = np.empty((n_network, self.capacity, 1), dtype=np.float64)
+        
         self.sum_tree = [SumTree(capacity) for _ in range(n_network)]
         self.max_priority = [alpha for _ in range(n_network)]
         self.min_priority = [alpha for _ in range(n_network)]
         self.alpha = alpha
-        self.capacity = capacity
         
     def add(self, 
             observation_tm1: np.ndarray,
@@ -24,6 +25,7 @@ class PriorityBuffer(ExperienceBuffer):
         
         batch_size = observation_tm1.shape[1] 
         update_indices = self.get_update_indices(batch_size)
+        self.td_buf[:, update_indices, :] = 0
         
         for i in range(self.n_network):
             self.sum_tree[i].update_values(
@@ -51,12 +53,15 @@ class PriorityBuffer(ExperienceBuffer):
     def update_priorities(self, indices, priorities):
         
         priorities = (priorities + 1e-10) ** self.alpha
-        #priorities = np.sqrt((priorities + 1e-10))
+        #priorities = np.sqrt((priorities + 1e-10)) # faster version for alpha=0.5
         self.max_priority = np.maximum(self.max_priority, np.amax(priorities, axis=1))
         self.min_priority = np.minimum(self.min_priority, np.amin(priorities, axis=1))
         
         for i in range(self.n_network):
             self.sum_tree[i].update_values(indices[i], priorities[i])
+            
+    def get_tds(self, indices): 
+        return self.td_buf[:,indices, :]
         
     def serializable(self):
         

@@ -161,7 +161,7 @@ class DQNPolicy:
         q_vals = jnp.where(lms, q_vals, -jnp.inf)
 
         # select best action
-        return rlax.greedy().sample(key, q_vals)
+        return rlax.greedy().sample(key, q_vals), jnp.max(q_vals, axis=1)
 
 class DQNLearning:
     @staticmethod
@@ -303,8 +303,10 @@ class DQNAgent:
         self.params = params
         self.reward_shaper = reward_shaper
         self.rng = hk.PRNGSequence(jax.random.PRNGKey(params.seed))
-        self.drawn_priorities = []
         self.n_network = params.n_network
+        # for evaluating absolute td errors near start of training
+        self.drawn_td_abs = [[] for _ in range(self.n_network)]
+        self.store_td = True
 
         # Function to build and initialize Q-network. Use Noisy Network or MLP
         def build_network(
@@ -391,10 +393,11 @@ class DQNAgent:
         keys = jnp.array([next(self.rng) for _ in range(self.n_network)])
         
         parallel_eval = jax.vmap(DQNPolicy.eval_policy, in_axes=(None, None, None, 0, 0, 0, 0))
-        actions = parallel_eval(self.network, self.params.use_distribution, self.atoms, 
+        actions, q_values = parallel_eval(self.network, self.params.use_distribution, self.atoms, 
                                 self.online_params, keys, obs, vla)
         
-        return jax.tree_util.tree_map(onp.array, actions).flatten()
+        return (jax.tree_util.tree_map(onp.array, actions).flatten(),
+                jax.tree_util.tree_map(onp.array, q_values).flatten())
 
     def explore(self, observations):
         observations, legal_actions = observations[1]
@@ -445,6 +448,7 @@ class DQNAgent:
             
             parallel_update = jax.vmap(self.update_q, in_axes=(None, None, None, 0, 0, 0, 
                                                                0, None, 0, None, None, None))
+
             
             self.online_params, self.opt_state, tds = parallel_update(
                 self.network,
@@ -455,13 +459,18 @@ class DQNAgent:
                 self.opt_state,
                 transitions,
                 self.params.discount,
-                onp.array(prios),
+                prios,
                 self.params.beta_is(self.train_step),
                 self.params.use_double_q,
                 self.params.use_distribution)
                         
             if self.params.use_priority:
-                self.buffer.update_priorities(sample_indices, onp.abs(tds))
+                
+                tds_abs = onp.abs(tds)
+                if self.store_td:
+                    for i, td in enumerate(tds_abs):
+                        self.drawn_td_abs[i].extend(td)
+                self.buffer.update_priorities(sample_indices, tds_abs)
 
             if self.train_step % self.params.target_update_period == 0:
                 self.trg_params = self.online_params
@@ -520,26 +529,29 @@ class DQNAgent:
                 for i, serialized in enumerate(pickle.load(iwf)):
                     self.experience[i].load(serialized)
                 
-#     def get_buffer_priorities(self):
-#         if self.params.use_priority:
-#             index_list = range(self.experience.size)
-#             return self.experience.get_priorities(index_list)
-#         else:
-#             return None
-#         
-#     def get_drawn_priorities(self, reset=True):
-#         prios = self.drawn_priorities.copy()
-#         self.drawn_priorities.clear()
-#         return prios
-#     
-#     def get_stochasticity(self):
-#         
-#         def process_weights(w):
-#             return onp.mean(onp.abs(w['w_sigma']))
-#         
-#         if self.params.use_noisy_network:
-#             weights = hk.data_structures.to_mutable_dict(self.online_params)
-#             return [process_weights(w) for w in weights.values()]
-#         else:
-#             return None
+    def get_buffer_tds(self):
+        if self.params.use_priority:
+            index_list = range(self.buffer.size)
+            return self.buffer.get_tds(index_list)
+        else:
+            return None
+         
+    def get_drawn_tds(self, reset=True, deactivate=True):
+        tds = onp.array(self.drawn_td_abs)
+        if reset:
+            for i in range(self.n_network):
+                self.drawn_td_abs[i].clear()
+        self.store_td = not deactivate
+        return tds
+     
+    def get_stochasticity(self):
+         
+        def process_weights(w):
+            return onp.mean(onp.abs(w['w_sigma']), axis=(1,2))
+         
+        if self.params.use_noisy_network:
+            weights = hk.data_structures.to_mutable_dict(self.online_params)
+            return [process_weights(w) for w in weights.values()]
+        else:
+            return None
 
