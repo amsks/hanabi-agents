@@ -16,8 +16,6 @@ class NoisyLinear(hk.Module):
             output_size: int,
             rng: jax.random.PRNGKey,
             with_bias: bool = True,
-            w_init: Optional[hk.initializers.Initializer] = None,
-            b_init: Optional[hk.initializers.Initializer] = None,
             w_mu_init: Optional[hk.initializers.Initializer] = None,
             b_mu_init: Optional[hk.initializers.Initializer] = None,
             w_sigma_init: Optional[hk.initializers.Initializer] = None,
@@ -40,8 +38,6 @@ class NoisyLinear(hk.Module):
     self.input_size = None
     self.output_size = output_size
     self.with_bias = with_bias
-    self.w_init = w_init
-    self.b_init = b_init or jnp.zeros
     self.w_mu_init = w_mu_init
     self.b_mu_init = b_mu_init or jnp.zeros
     self.w_sigma_init = w_sigma_init
@@ -143,8 +139,6 @@ class NoisyMLP(hk.Module):
       layers.append(NoisyLinear(
                               output_size=output_size,
                               rng=key,
-                              w_init=w_init,
-                              b_init=b_init,
                               w_mu_init=w_mu_init,
                               b_mu_init=b_mu_init,
                               w_sigma_init=w_sigma_init,
@@ -221,8 +215,6 @@ class NoisyMLP(hk.Module):
 
     return NoisyMLP(
         output_sizes=(layer.input_size for layer in reversed(self.layers)),
-        w_init=self.w_init,
-        b_init=self.b_init,
         w_mu_init=self.w_mu_init,
         b_mu_init=self.b_mu_init,
         w_sigma_init=self.w_sigma_init,

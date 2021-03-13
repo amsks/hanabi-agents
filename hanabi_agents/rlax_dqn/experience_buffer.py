@@ -67,16 +67,16 @@ class ExperienceBuffer:
         else:
              
             tail = self.next_entry + batch_size - self.capacity
-            self.obs_tm1_buf[:, self.next_entry:, :] = observation_tm1[:batch_size - tail]
-            self.act_tm1_buf[:, self.next_entry:, :] = action_tm1[:batch_size - tail]
-            self.obs_t_buf[:, self.next_entry:, :] = observation_t[:batch_size - tail]
-            self.rew_t_buf[:, self.next_entry:, :] = reward_t[:batch_size - tail]
-            self.terminal_t_buf[:, self.oldest_entry:, :] = terminal_t[:batch_size - tail]
-            self.obs_tm1_buf[:, :tail, :] = observation_tm1[-tail:]
-            self.act_tm1_buf[:, :tail, :] = action_tm1[-tail:]
-            self.obs_t_buf[:, :tail, :] = observation_t[-tail:]
-            self.rew_t_buf[:, :tail, :] = reward_t[-tail:]
-            self.terminal_t_buf[:, :tail, :] = terminal_t[-tail:]
+            self.obs_tm1_buf[:, self.next_entry:, :] = observation_tm1[:, :batch_size - tail]
+            self.act_tm1_buf[:, self.next_entry:, :] = action_tm1[:, :batch_size - tail]
+            self.obs_t_buf[:, self.next_entry:, :] = observation_t[:, :batch_size - tail]
+            self.rew_t_buf[:, self.next_entry:, :] = reward_t[:, :batch_size - tail]
+            self.terminal_t_buf[:, self.next_entry:, :] = terminal_t[:, :batch_size - tail]
+            self.obs_tm1_buf[:, :tail, :] = observation_tm1[:, -tail:]
+            self.act_tm1_buf[:, :tail, :] = action_tm1[:, -tail:]
+            self.obs_t_buf[:, :tail, :] = observation_t[:, -tail:]
+            self.rew_t_buf[:, :tail, :] = reward_t[:, -tail:]
+            self.terminal_t_buf[:, :tail, :] = terminal_t[:, -tail:]
             self.next_entry = tail
             self.size = self.capacity
             
