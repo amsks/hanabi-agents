@@ -94,8 +94,6 @@ class NoisyMLP(hk.Module):
       self,
       output_sizes: Iterable[int],
       with_bias=True,
-      w_init: Optional[hk.initializers.Initializer] = None,
-      b_init: Optional[hk.initializers.Initializer] = None,
       w_mu_init: Optional[hk.initializers.Initializer] = None,
       b_mu_init: Optional[hk.initializers.Initializer] = None,
       w_sigma_init: Optional[hk.initializers.Initializer] = None,
@@ -124,8 +122,6 @@ class NoisyMLP(hk.Module):
     self.rng = jax.random.PRNGKey(seed)
     super().__init__(name=name)
     self.with_bias = with_bias
-    self.w_init = w_init
-    self.b_init = b_init
     self.w_mu_init = w_mu_init
     self.b_mu_init = b_mu_init
     self.w_sigma_init = w_sigma_init
