@@ -58,7 +58,7 @@ class PriorityBuffer(ExperienceBuffer):
         self.min_priority = np.minimum(self.min_priority, np.amin(priorities, axis=1))
         
         for i in range(self.n_network):
-            self.td_buf[i, indices[i], :] = tds
+            self.td_buf[i, indices[i], :] = tds[i]
             self.sum_tree[i].update_values(indices[i], priorities[i])
             
     def get_tds(self, indices): 
