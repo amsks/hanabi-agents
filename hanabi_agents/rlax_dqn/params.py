@@ -21,6 +21,7 @@ class RlaxRainbowParams(NamedTuple):
     priority_w: float = 0.6
     history_size: int = 1
     fixed_weights: bool = False
+    factorized_noise: bool = True
     
 @gin.configurable
 class RewardShapingParams(NamedTuple):
