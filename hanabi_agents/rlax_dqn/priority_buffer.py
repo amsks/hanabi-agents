@@ -50,14 +50,15 @@ class PriorityBuffer(ExperienceBuffer):
         
         return self[indices], indices, prios
 
-    def update_priorities(self, indices, priorities):
+    def update_priorities(self, indices, tds):
         
-        priorities = (priorities + 1e-10) ** self.alpha
+        priorities = (tds + 1e-10) ** self.alpha
         #priorities = np.sqrt((priorities + 1e-10)) # faster version for alpha=0.5
         self.max_priority = np.maximum(self.max_priority, np.amax(priorities, axis=1))
         self.min_priority = np.minimum(self.min_priority, np.amin(priorities, axis=1))
         
         for i in range(self.n_network):
+            self.td_buf[i, indices[i], :] = tds
             self.sum_tree[i].update_values(indices[i], priorities[i])
             
     def get_tds(self, indices): 
