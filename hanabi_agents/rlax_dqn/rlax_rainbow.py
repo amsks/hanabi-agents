@@ -188,6 +188,7 @@ class DQNLearning:
             beta_is            -- importance sampling exponent
         """
 
+
         def categorical_double_q_td(online_params, trg_params, obs_tm1, a_tm1, r_t, obs_t, term_t, discount_t):
             """
             calculate double q td loss for distributional network
@@ -274,6 +275,7 @@ class DQNLearning:
             prios
         )
 
+        
         updates, opt_state_t = optimizer.update(grads, opt_state)
         online_params_t = optax.apply_updates(online_params, updates)
         return online_params_t, opt_state_t, new_prios
@@ -467,7 +469,7 @@ class DQNAgent:
 
     def __repr__(self):
         return f"<rlax_dqn.DQNAgent(params={self.params})>"
-
+      
     def save_weights(self, path, fname_part, only_weights=True):
         """
         Save online and target network weights to the specified path
@@ -518,7 +520,7 @@ class DQNAgent:
             with open(opt_state_file, 'rb') as iwf:
                 self.opt_state = pickle.load(iwf)
             self.train_step = onp.asscalar(self.opt_state[0].count)
-            
+
         # experience buffer
         if experience_file is not None:
             with open(experience_file, 'rb') as iwf:
