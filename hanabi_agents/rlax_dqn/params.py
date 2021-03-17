@@ -13,6 +13,8 @@ class RlaxRainbowParams(NamedTuple):
     layers: List[int] = [512]
     use_double_q: bool = True
     use_priority: bool = True
+    use_distribution: bool = True
+    use_noisy_network: bool = True
     experience_buffer_size: int = 2**19
     seed: int = 1234
     n_atoms: int = 51
