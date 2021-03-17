@@ -21,7 +21,7 @@ class NoisyLinear(hk.Module):
             w_sigma_init: Optional[hk.initializers.Initializer] = None,
             b_sigma_init: Optional[hk.initializers.Initializer] = None,
             name: Optional[str] = None,
-            factorized_noise: bool = False
+            factorized_noise: bool = True
   ):
     """Constructs the Linear module.
     Args:
@@ -102,7 +102,7 @@ class NoisyMLP(hk.Module):
       activate_final: bool = False,
       name: Optional[str] = None,
       seed: int = 1234,
-      factorized_noise: bool = False
+      factorized_noise: bool = True
   ):
     """Constructs an MLP.
     Args:

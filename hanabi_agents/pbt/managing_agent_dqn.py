@@ -2,7 +2,7 @@ from typing import Callable
 import numpy as np
 import math
 from hanabi_learning_environment import pyhanabi_pybind as pyhanabi
-from hanabi_agents.rlax_dqn import DQNAgent, RlaxRainbowParams, PBTParams
+from hanabi_agents.rlax_dqn import DQNAgent, DQNParallel, RlaxRainbowParams, PBTParams
 from hanabi_agents.rlax_dqn import RewardShapingParams, RewardShaper
 from hanabi_agents.rlax_dqn import VectorizedObservationStacker
 import gin
@@ -67,6 +67,7 @@ class AgentDQNPopulation:
             population_params: PBTParams = PBTParams(),
             agent_params: RlaxRainbowParams = RlaxRainbowParams(),
             reward_shaping_params: RewardShapingParams = RewardShapingParams(),
+            agent_data = None,
             eval_run = False):
 
         self.pbt_params = population_params
@@ -93,7 +94,7 @@ class AgentDQNPopulation:
         self.pbt_history_params = []
 
         self.max_score = 15 #"""!!!!!!!!!!!!!!!!!!!!!!!!!"""
-
+        
 
         self.reward_shaper = []
         for i in range(self.pop_size):
@@ -113,29 +114,6 @@ class AgentDQNPopulation:
         #             agent.restore_weights(*(start_with_weights["agent_" + str(aid)]))
 
         '''
-        2. Parse config files
-        '''
-        # # TODO: --done-- logic to generate actual DQN agents from params
-        # if not self.pbt_params.agent_config_path:
-        #     gin.parse_config_file(self.pbt_params.gin_files)
-        #     gin_params = RlaxRainbowParams()
-        #     print(gin_params)
-        # # if not self.params.agent_config_path:
-        # #     if len(self.params.gin_files) == 1:
-        # #         gin.parse_config_file(self.params.gin_files)
-        # #         agent_params = [RlaxRainbowParams()]
-        # #         print(agent_params)
-        # #     # TODO: ---done--- implement logic for different gins upon start -
-        # #     else:
-        # #         assert (len(self.params.gin_files) == self.pop_size, \
-        # #                 "number of gin_files(agent config params) doesn't match pop_size!")
-        # #
-        # #         for i in range(self.pop_size):
-        # #             gin.parse_config_file(self.params.gin_files[i])
-        # #             agent_params = []
-        # #             agent_params.append = RlaxRainbowParams()
-
-        '''
         3. Initialize atomic agents with randomly chosen lr and buffersize from given intervals
         '''
         def sample_buffersize():
@@ -145,28 +123,41 @@ class AgentDQNPopulation:
             return random.choice(buffer_sizes_start)
 
         def sample_init_lr():
-            min_lr = self.agent_params.learning_rate - self.pbt_params.lr_start_value
-            max_lr = self.agent_params.learning_rate + self.pbt_params.lr_start_value
-            return random.uniform(min_lr, max_lr)
+            return random.choice(np.linspace(self.pbt_params.lr_min, self.pbt_params.lr_max, self.pbt_params.lr_sample_size))
+        
+        def sample_init_alpha():
+            return random.choice(np.linspace(self.pbt_params.alpha_min, self.pbt_params.alpha_max, self.pbt_params.alpha_sample_size))
+        
 
         agent_configs = []
 
         for j in range(self.pop_size):
-            custom_params = self.agent_params
-            custom_params = custom_params._replace(learning_rate = sample_init_lr())
-            custom_params = custom_params._replace(experience_buffer_size = sample_buffersize())
-
-            agent = DQNAgent(self.env_obs_size,
-                                    self.env_act_size,
-                                    custom_params)
-            # agent = DQNAgent(self.env_obs_size,
-            #                  self.env_act_size,
-            #                  custom_params)
-            self.agents.append(agent)
-        # agents_status(self.agents)
-
+            if not agent_data:
+                print('Sampling new Agent!')
+                custom_params = self.agent_params
+                custom_params = custom_params._replace(learning_rate = sample_init_lr())
+                custom_params = custom_params._replace(experience_buffer_size = sample_buffersize())
+                custom_params = custom_params._replace(priority_w = sample_init_alpha())
+                #alpha
+                agent = DQNParallel(self.env_obs_size,
+                                        self.env_act_size,
+                                        custom_params)
+                self.agents.append(agent)
+            else:
+                print('New Agent from evolved Parameters!')
+                custom_params = self.agent_params
+                custom_params = custom_params._replace(learning_rate = agent_data[j]['lr'])
+                custom_params = custom_params._replace(experience_buffer_size = agent_data[j]['buffersize'])
+                custom_params = custom_params._replace(priority_w = agent_data[j]['alpha'])
+                agent = DQNParallel(self.env_obs_size,
+                        self.env_act_size,
+                        custom_params)
+                self.agents.append(agent)
+        
         self.evo_steps = 0
         print('No of agents in this', len(self.agents))
+
+
 
     def explore(self, observations):
         """Explore functionality: Breaks env_obs in chunks of obs_chunk_size and passes it to respective sub-agents """
@@ -178,7 +169,6 @@ class AgentDQNPopulation:
             action_chunks.append(actions_rem)
         actions = np.concatenate(action_chunks, axis = 0)
         return actions
-
 
     def exploit(self, observations):
         """Breaks env_obs in chunks of obs_chunk_size and passes it to respective sub-agents"""
@@ -199,8 +189,6 @@ class AgentDQNPopulation:
     def add_experience_first(self, observations, step_types):
         pass
 
-
-
     def add_experience(self, obersvation_tm1, actions, rewards, observations, step_types):
         '''Breaks input into chunks and adds them to experience buffer'''
         # start_time = time.time()
@@ -215,7 +203,6 @@ class AgentDQNPopulation:
 
             agent.add_experience(obs_tm1_chunk, action_chunk, reward_chunk, obs_chunk, step_chunk)
         # print('add_exp took {} seconds'.format(time.time()-start_time))
-
 
     def shape_rewards(self, observations, moves):
     
@@ -248,7 +235,6 @@ class AgentDQNPopulation:
     def requires_vectorized_observation(self):
         return True
 
-
     def save_weights(self, path, mean_reward):
         """saves the weights of all agents to the respective directories"""
         for i, agent in enumerate(self.agents):
@@ -256,6 +242,13 @@ class AgentDQNPopulation:
                 agent.save_weights(path, "ckpt_" + str(agent.train_step))
                 self.prev_reward = mean_reward[i]
     
+    def save_weights_fast(self, path, mean_reward):
+        """saves the weights of all agents to the respective directories"""
+        os.makedirs(path)
+        for i, agent in enumerate(self.agents):
+            agent.save_weights(path, "ckpt_" + str(agent.train_step) + '_agent_' + str(i))
+
+
     def save_specific_agent(self, path, index, act_vec, score):
         if not os.path.isdir(path):
             os.makedirs(path)
@@ -274,7 +267,6 @@ class AgentDQNPopulation:
                     self.reward_shaper[index].w_play_probability,
                     self.reward_shaper[index].min_play_probability,
                     self.reward_shaper[index].penalty_last_of_kind]))
-
 
     def _choose_fittest(self, mean_reward):
         """Chosses the fittest agents after evaluation run and overwrites all the other agents with weights + permutation of lr + buffersize"""
@@ -485,6 +477,15 @@ class AgentDQNPopulation:
         return {'online_weights' : online_weights, 'trg_weights' : trg_weights,
                 'opt_states' : opt_states, 'experience' : experience, 'parameters' : parameters}
     
+    def save_min_characteristics(self):
+        characteristics = {'buffersize' : [], 'lr' : [], 'alpha': []}
+        for agent in self.agents:
+            print('aaaagent')
+            characteristics['buffersize'].append(agent.buffersize)
+            characteristics['lr'].append(agent.learning_rate)
+            characteristics['alpha'].append(agent.experience[0].alpha)
+        return characteristics
+
     def restore_characteristics(self, characteristics):
         for i, agent in enumerate(self.agents):
             print('Restoring agent no {}!'.format(i))

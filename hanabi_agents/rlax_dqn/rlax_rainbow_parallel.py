@@ -16,9 +16,10 @@ import optax
 import jax.numpy as jnp
 import rlax
 import chex
-import ray
 import time
 import concurrent.futures
+import json
+import os
 
 from .experience_buffer import ExperienceBuffer
 from .priority_buffer import PriorityBuffer
@@ -274,7 +275,6 @@ class DQNAgent:
 
         # Build and initialize optimizer.
         self.optimizer = optax.adam(params.learning_rate, eps=3.125e-5)
-
         opt_state_parallel = jax.vmap(self.optimizer.init, in_axes=(0))
 
         # self.opt_state = self.optimizer.init(self.online_params)
@@ -285,8 +285,8 @@ class DQNAgent:
 
         ## parallelized vmap functions
         self.update_q_parallel = jax.vmap(DQNLearning.update_q, in_axes=(None, None, None, 0, 0, 0, {"observation_tm1" : 0, "action_tm1" : 0, "reward_t" : 0, "observation_t" : 0, "legal_moves_t" : 0, "terminal_t" : 0}, None, 0, None))
-        self.exploit_eval_policy = jax.vmap(DQNPolicy.eval_policy, in_axes=(None, None, 0, None, 0, 0))
-        self.exploit_policy = jax.vmap(DQNPolicy.policy, in_axes=(None, None, 0, None, None, 0, 0))
+        self.exploit_eval_policy = jax.vmap(DQNPolicy.eval_policy, in_axes=(None, None, 0, 0, 0, 0))
+        self.exploit_policy = jax.vmap(DQNPolicy.policy, in_axes=(None, None, 0, None, 0, 0, 0))
 
         self.learning_rate = self.params.learning_rate
         self.buffersize = self.params.experience_buffer_size
@@ -317,10 +317,11 @@ class DQNAgent:
         obs_len = int(observations[1][0].shape[0]/self.num_parallel)
         observations_ = observations[1][0].reshape(self.num_parallel, obs_len, -1)
         legal_actions = observations[1][1].reshape(self.num_parallel, obs_len, -1)
+        key_rng = jnp.asarray([next(self.rng) for i in range(self.num_parallel)])
         # actions = DQNPolicy.eval_policy(
         actions = self.exploit_eval_policy(
             self.network, self.atoms, self.online_params,
-            next(self.rng), observations_, legal_actions)
+            key_rng, observations_, legal_actions)
         actions = onp.concatenate(onp.asarray(actions), axis = None)
         return jax.tree_util.tree_map(onp.array, actions)
 
@@ -329,12 +330,12 @@ class DQNAgent:
         obs_len = int(observations[1][0].shape[0]/self.num_parallel)
         observations_ = observations[1][0].reshape(self.num_parallel, obs_len, -1)
         legal_actions = observations[1][1].reshape(self.num_parallel, obs_len, -1)
-
+        key_rng = jnp.asarray([next(self.rng) for i in range(self.num_parallel)])
         # legal_actions = onp.split(observations[1][1], self.num_parallel)
         # _, actions = DQNPolicy.policy(
         _, actions = self.exploit_policy(
             self.network, self.atoms, self.online_params,
-            self.params.epsilon(self.train_step), next(self.rng),
+            self.params.epsilon(self.train_step), key_rng,
             observations_, legal_actions)
         # print('explore took {} seconds'.format(time.time()-start_time))
         actions = onp.concatenate(onp.asarray(actions), axis = None)
@@ -346,7 +347,7 @@ class DQNAgent:
         pass
 
     def add_experience(self, observations_tm1, actions_tm1, rewards_t, observations_t, term_t):
-        start_time = time.time()
+        # start_time = time.time()
         obs_vec_tm1 = observations_tm1[1][0]
         obs_vec_t = observations_t[1][0]
         legal_actions_t = observations_t[1][1]
@@ -361,7 +362,7 @@ class DQNAgent:
                 legal_actions_t[i*obs_len:(i+1)*obs_len],
                 term_t[i*obs_len:(i+1)*obs_len])
 
-        self.total_add_time += start_time-time.time()
+        # self.total_add_time += start_time-time.time()
 
         
     def shape_rewards(self, observations, moves):
@@ -376,11 +377,9 @@ class DQNAgent:
         return buffer.update_priorities(indices, prios)
 
     def update(self):
-        # start_time=time.time()
         """Make one training step.
         """
-        ## use ray?
-        start_time = time.time()
+        # start_time = time.time()
         if self.params.use_priority:
             sample_indices, prios, c = [], [], []
             futures = []
@@ -391,8 +390,6 @@ class DQNAgent:
             return_value = [i.result() for i in futures]
             for _a, _b, _c in return_value:
 
-            # for i in range(self.num_parallel):
-                # _a, _b, _c = self.experience[i].sample_batch(self.params.train_batch_size)
                 sample_indices.append(_a)
                 prios.extend(_b)
                 c.append(_c._asdict())
@@ -401,11 +398,8 @@ class DQNAgent:
             transitions = {}
             for key in c[0]:
                 transitions[key] = onp.stack([b[key] for b in c], axis = 0)
-            # transitions = onp.asarray(transitions)
-            # prios = onp.asarray(prios)
-            # sample_indices = onp.asarray(sample_indices)
+
         else:
-            #fix needed
             c = []
             for i in range(self.num_parallel):
                 _c = self.experience[i].sample(self.params.train_batch_size)
@@ -416,7 +410,7 @@ class DQNAgent:
                     transitions[key] = onp.stack([b[key] for b in c], axis = 0)
             prios = onp.ones((self.num_parallel, self.params.train_batch_size))
         
-        self.total_sample_time += start_time-time.time()
+        # self.total_sample_time += start_time-time.time()
 
         self.online_params, self.opt_state, tds = self.update_q_parallel(
             self.network,
@@ -430,20 +424,20 @@ class DQNAgent:
             prios,
             self.params.beta_is(self.train_step))
 
-        start_time = time.time()
+        # start_time = time.time()
 
         if self.params.use_priority:
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 
                 executor.map(self.experience, sample_indices,  onp.abs(tds))
                    
-        self.total_prio_update += start_time-time.time()
+        # self.total_prio_update += start_time-time.time()
 
         if self.train_step % self.params.target_update_period == 0:
             self.trg_params = self.online_params
-            print('add_exp took {:.2f} seconds'.format(self.total_add_time))
-            print('PrioUpdates took {:.2f}s'.format(self.total_prio_update))
-            print('Sampling took {:.2f}s'.format(self.total_sample_time))
+            # print('add_exp took {:.2f} seconds'.format(self.total_add_time))
+            # print('PrioUpdates took {:.2f}s'.format(self.total_prio_update))
+            # print('Sampling took {:.2f}s'.format(self.total_sample_time))
         self.train_step += 1
 
         # print('update took {} seconds'.format(time.time()-start_time))
@@ -459,7 +453,13 @@ class DQNAgent:
     def __repr__(self):
         return f"<rlax_dqn.DQNAgent(params={self.params})>"
 
-    def save_weights(self, path, fname_part):
+    def save_attributes(self, path, name):
+        _dict = {'lr': self.learning_rate, 'buffersize': self.buffersize, 'alpha': self.experience[0].alpha}
+        path = os.path.join(path, name + '.json')
+        with open(path, 'w') as fp:
+            json.dump(_dict, fp)
+
+    def save_weights(self, path, fname_part, save_attributes = True):
         """Save online and target network weights to the specified path"""
 
         # TODO save weights using something other than pickle (e.g. numpy + protobuf)
@@ -469,10 +469,15 @@ class DQNAgent:
         #           self.online_params)
         #  onp.save(join_path(path, "rlax_rainbow_" + fname_part + "_" + str(self.train_step) + "_target.npy"),
         #           self.trg_params)
-        with open(join_path(path, "rlax_rainbow_" + fname_part + "_online.pkl"), 'wb') as of:
-            pickle.dump(self.online_params, of)
-        with open(join_path(path, "rlax_rainbow_" + fname_part + "_target.pkl"), 'wb') as of:
-            pickle.dump(self.trg_params, of)
+        # for i, (online, target) in enumerate(zip(self.online_params, self.trg_params)):
+        with open(join_path(path, "rlax_rainbow_" + fname_part + '_{}'.format(i) + "_online.pkl"), 'wb') as of:
+            pickle.dump(online, of)
+        with open(join_path(path, "rlax_rainbow_" + fname_part + '_{}'.format(i) + "_target.pkl"), 'wb') as of:
+            pickle.dump(target, of)
+
+        self.save_attributes(path, fname_part)
+
+
 
     def restore_weights(self, online_weights_file, trg_weights_file):
         """Restore online and target network weights from the specified files"""

@@ -59,13 +59,22 @@ class PBTParams(NamedTuple):
     obs_no: int = 10000
     n_mean: int = 5
 
+
+    change_alpha: bool = True
+    factor_alpha: float = 1.05
+    alpha_min: float = 0.3
+    alpha_max: float = 1
+    alpha_sample_size: int = 10
+
     change_buffersize: bool = True
     buffersize_start_factor: int = 4
     buffersize_factor: int = 2
 
     change_learning_rate: bool = True
     lr_factor: float = 0.2
-    lr_start_value: float = 6.25e-5
+    lr_min: float = 1e-3
+    lr_max: float = 1e-6
+    lr_sample_size: int = 10
 
     change_min_play_probability: bool = False
     change_w_play_probability: bool = False
