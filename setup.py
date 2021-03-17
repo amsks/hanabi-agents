@@ -17,5 +17,6 @@ setup(
     url='https://github.com/braintimeException/hanabi_agents',
     author='braintimeException',
     cmdclass={'install': InstallSumTreePackage},
-    packages=find_packages()
+    packages=find_packages(),
+    install_requires=['optax']
 )

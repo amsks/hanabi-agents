@@ -1,5 +1,6 @@
 from typing import Tuple
 import numpy as np
+import pickle
 from .transition import Transition
 
 class ExperienceBuffer:
@@ -85,6 +86,31 @@ class ExperienceBuffer:
             self._obs_tm1_buf[indices], self._act_tm1_buf[indices],
             self._rew_t_buf[indices], self._obs_t_buf[indices],
             self._lms_t_buf[indices], self._terminal_t_buf[indices])
+    
+    def serializable(self):      
+        lst_serialize = [self._obs_tm1_buf, 
+                         self._act_tm1_buf, 
+                         self._obs_t_buf,
+                         self._lms_t_buf, 
+                         self._rew_t_buf, 
+                         self._terminal_t_buf,
+                         self._sample_range, 
+                         self.oldest_entry, 
+                         self.capacity, 
+                         self.size]
+        return lst_serialize
+    
+    def load(self, lst_serializable):
+        self._obs_tm1_buf = lst_serializable[0]
+        self._act_tm1_buf = lst_serializable[1]
+        self._obs_t_buf = lst_serializable[2]
+        self._lms_t_buf = lst_serializable[3]
+        self._rew_t_buf = lst_serializable[4]
+        self._terminal_t_buf = lst_serializable[5]
+        self._sample_range = lst_serializable[6]
+        self.oldest_entry = lst_serializable[7]
+        self.capacity = lst_serializable[8]
+        self.size = lst_serializable[9]
 
     def sample(self, batch_size: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray,
                                                np.ndarray, np.ndarray]:
