@@ -1,7 +1,5 @@
 from .ruleset import Ruleset
 from hanabi_learning_environment import pyhanabi_pybind as pyhanabi
-import timeit
-import numpy as np
 
 
 class RulebasedAgent():
@@ -10,7 +8,6 @@ class RulebasedAgent():
         self.rules = rules
         self.totalCalls = 0
         self.histogram = [0 for i in range(len(rules)+1)]
-        self.reward_shaper = None
 
 
     def get_move(self, observation):
@@ -18,6 +15,7 @@ class RulebasedAgent():
             for index, rule in enumerate(self.rules):
                 action = rule(observation)
                 if action is not None:
+                    # print(rule)
                     self.histogram[index] += 1
                     self.totalCalls += 1
                     return action
@@ -35,22 +33,16 @@ class RulebasedAgent():
     def exploit(self, observations):
         return self.explore(observations)
 
+
     def requires_vectorized_observation(self):
         return False
 
-    def add_experience(self, otm1, atm1, rt, ot, tt):
+
+    def add_experience_first(self, o,  st):
+        pass
+
+    def add_experience(self, o, a, r, st):
         pass
 
     def update(self):
         pass
-
-    def shape_rewards(self, observations, moves):
-        return (np.zeros((len(observations), )), np.zeros((len(observations),)))
-    
-    def create_stacker(self, obs_len, n_states):
-        return None
-
-    def save_weights(self, a, b):
-        pass
-    
-    

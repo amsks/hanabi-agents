@@ -27,23 +27,11 @@ outer_rules = [
     Ruleset.discard_randomly
 ]
 
-piers_rules_adjusted = [
-    Ruleset.hail_mary,
-    Ruleset.play_safe_card,
-    Ruleset.play_probably_safe_factory(0.5, True),
-    Ruleset.play_probably_safe_factory(0.9, False),
-    Ruleset.tell_anyone_useful_card,
-    Ruleset.tell_dispensable_factory(2),
-    Ruleset.discard_probably_useless_factory(0.75),
-    Ruleset.discard_oldest_first,
-    Ruleset.tell_randomly,
-    Ruleset.discard_randomly
-]
-
 piers_rules = [
     Ruleset.hail_mary,
-    Ruleset.play_safe_card,
-    Ruleset.play_probably_safe_factory(0.7, True),
+    #Ruleset.play_safe_card,
+    Ruleset.play_probably_safe_factory(0.9999, False),
+    Ruleset.play_probably_safe_factory(0.8, True),
     Ruleset.tell_anyone_useful_card,
     Ruleset.tell_dispensable_factory(3),
     Ruleset.osawa_discard,
@@ -55,18 +43,26 @@ piers_rules = [
 all_rules = [
     Ruleset.discard_oldest_first,
     Ruleset.osawa_discard,
-    Ruleset.tell_unknown,
+    
+    #todo:buggy
+    #Ruleset.tell_unknown,
+    
     Ruleset.tell_randomly,
-    Ruleset.play_safe_card,
-    Ruleset.play_if_certain,
+    #Ruleset.play_safe_card,
+    #Ruleset.play_if_certain,
     Ruleset.tell_playable_card_outer,
     Ruleset.tell_dispensable_factory(3),
     Ruleset.tell_anyone_useful_card,
+    
+    #todo: test
     Ruleset.tell_anyone_useless_card,
-    Ruleset.tell_most_information,
-    Ruleset.tell_playable_card,
-    Ruleset.legal_random,
-    Ruleset.discard_randomly,
+    
+    #todo:
+    #Ruleset.tell_most_information,
+    #Ruleset.tell_playable_card,
+    
+    #Ruleset.legal_random,
+    #Ruleset.discard_randomly,
     
     #needs parameters:
     Ruleset.play_probably_safe_factory(0.6, True),
