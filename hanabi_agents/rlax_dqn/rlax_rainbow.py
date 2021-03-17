@@ -498,7 +498,7 @@ class DQNAgent:
             with open(join_path(path, "rlax_rainbow_" + fname_part + "_opt_state.pkl"), 'wb') as of:
                 pickle.dump(jax.tree_util.tree_map(onp.array, self.opt_state), of)
             with open(join_path(path, "rlax_rainbow_" + fname_part + "_experience.pkl"), 'wb') as of:
-                pickle.dump([e.serializable() for e in self.experience], of)
+                pickle.dump([e.serializable() for e in self.buffer], of)
     
     # older versions of haiku store weights as frozendict, convert to mutable dict and then to FlatMapping
     def _compat_restore_weights(self, file_w):
@@ -527,7 +527,7 @@ class DQNAgent:
         if experience_file is not None:
             with open(experience_file, 'rb') as iwf:
                 for i, serialized in enumerate(pickle.load(iwf)):
-                    self.experience[i].load(serialized)
+                    self.buffer[i].load(serialized)
                 
     def get_buffer_tds(self):
         if self.params.use_priority:
