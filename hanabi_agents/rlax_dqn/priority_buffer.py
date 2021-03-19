@@ -47,7 +47,7 @@ class PriorityBuffer(ExperienceBuffer):
         # use the key to retrieve indices (key=1 corresponds to tree root value)
         indices = self.sum_tree.get_indices(keys)
         # get priorities from sum tree and apply softmax normalization
-        prios = onp.array(self.sum_tree.get_values(indices)) / self.sum_tree.get_total_val()
+        prios = (onp.array(self.sum_tree.get_values(indices))+ 1e-10) / self.sum_tree.get_total_val()
   
         return indices, prios, self[indices]
 
