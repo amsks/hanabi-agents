@@ -405,7 +405,7 @@ class DQNAgent:
 
         self.experience.add_transitions(
             obs_vec_tm1,
-            actions_tm1,
+            actions_tm1.reshape(-1,1),
             rewards_t,
             obs_vec_t,
             term_t
