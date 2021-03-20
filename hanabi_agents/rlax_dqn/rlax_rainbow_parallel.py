@@ -27,9 +27,42 @@ from .noisy_mlp import NoisyMLP
 from .params import RlaxRainbowParams
 from .vectorized_stacker import VectorizedObservationStacker
 
+from optax._src import combine
+from optax._src import transform
+from typing import NamedTuple, Any, Callable, Sequence, Optional, Union
 
 DiscreteDistribution = collections.namedtuple(
     "DiscreteDistribution", ["sample", "probs", "logprob", "entropy"])
+
+OptState = NamedTuple  # Transformation states are (possibly empty) namedtuples.
+Params = Any  # Parameters are arbitrary nests of `jnp.ndarrays`.
+Updates = Params  # Gradient updates are of the same type as parameters.
+
+# Function used to initialise the transformation's state.
+TransformInitFn = Callable[
+    [Params],
+    Union[OptState, Sequence[OptState]]]
+# Function used to apply a transformation.
+TransformUpdateFn = Callable[
+    [Updates, OptState, Optional[Params]],
+    Tuple[Updates, OptState]]
+
+class GradientTransformation(NamedTuple):
+  """Optax transformations consists of a function pair: (initialise, update)."""
+  init: TransformInitFn
+  update: TransformUpdateFn
+
+def custom_adam(b1: float = 0.9, 
+                b2: float = 0.999, 
+                eps: float = 1e-8,
+                eps_root: float = 0.0) -> GradientTransformation: 
+    return combine.chain(
+        transform.scale_by_adam(b1=b1, b2=b2, eps=eps, eps_root=eps_root))
+
+def apply_lr(lr, updates, state):
+    updates = jax.tree_map(lambda g: lr * g, updates)
+    return updates
+
 
 
 class DQNPolicy:
@@ -156,7 +189,7 @@ class DQNPolicy:
 class DQNLearning:
     @staticmethod
     @partial(jax.jit, static_argnums=(0, 2))
-    def update_q(network, atoms, optimizer, online_params, trg_params, opt_state,
+    def update_q(network, atoms, optimizer, lr, online_params, trg_params, opt_state,
                  transitions, discount_t, prios, beta_is):
         """Update network weights wrt Q-learning loss.
 
@@ -221,6 +254,7 @@ class DQNLearning:
             prios)
 
         updates, opt_state_t = optimizer.update(grads, opt_state)
+        updates = apply_lr(lr, updates, opt_state)
         online_params_t = optax.apply_updates(online_params, updates)
         return online_params_t, opt_state_t, new_prios
     
@@ -232,7 +266,10 @@ class DQNAgent:
             self,
             observation_spec,
             action_spec,
-            params: RlaxRainbowParams = RlaxRainbowParams(),
+            buffersizes,
+            lrs,
+            alphas,
+            params: RlaxRainbowParams = RlaxRainbowParams(), 
             reward_shaper = None):
 
         if not callable(params.epsilon):
@@ -244,8 +281,13 @@ class DQNAgent:
         self.params = params
         self.reward_shaper = reward_shaper
         self.rng = hk.PRNGSequence(jax.random.PRNGKey(params.seed))
-        self.num_parallel = 4
 
+        # train 4 models in parallel
+        self.num_unique_parallel = 2
+        self.num_parallel = self.num_unique_parallel * len(lrs)
+        self.lrs = lrs
+        self.alpha = alphas
+        self.buffersize = buffersizes
         # Build and initialize Q-network.
         def build_network(
                 layers: List[int],
@@ -263,18 +305,13 @@ class DQNAgent:
         rng_init = jnp.asarray([next(self.rng) for i in range(self.num_parallel)])
         parallel_params = jax.vmap(self.network.init, in_axes=(0, None))
         self.trg_params = parallel_params(rng_init, onp.zeros((observation_spec.shape[0], observation_spec.shape[1] * self.params.history_size), dtype = onp.float16))
-        # self.trg_params = [self.network.init(next(self.rng), 
-        #     onp.zeros((observation_spec.shape[0], observation_spec.shape[1] * self.params.history_size), dtype = onp.float16)) for i in range(self.num_parallel)]
-        # print('SELF PARAMS', self.trg_params)
-        # self.trg_params = self.network.init(
-        #     next(self.rng), 
-        #     onp.zeros((observation_spec.shape[0], observation_spec.shape[1] * self.params.history_size), dtype = onp.float16))
+
         self.online_params = self.trg_params
         self.atoms = jnp.tile(jnp.linspace(-params.atom_vmax, params.atom_vmax, params.n_atoms),
                               (action_spec.num_values, 1))
 
         # Build and initialize optimizer.
-        self.optimizer = optax.adam(params.learning_rate, eps=3.125e-5)
+        self.optimizer = custom_adam(eps = 3.125e-5)
         opt_state_parallel = jax.vmap(self.optimizer.init, in_axes=(0))
 
         # self.opt_state = self.optimizer.init(self.online_params)
@@ -284,26 +321,44 @@ class DQNAgent:
 
 
         ## parallelized vmap functions
-        self.update_q_parallel = jax.vmap(DQNLearning.update_q, in_axes=(None, None, None, 0, 0, 0, {"observation_tm1" : 0, "action_tm1" : 0, "reward_t" : 0, "observation_t" : 0, "legal_moves_t" : 0, "terminal_t" : 0}, None, 0, None))
+        self.update_q_parallel = jax.vmap(DQNLearning.update_q, in_axes=(None, None, None, 0, 0, 0, 0, {"observation_tm1" : 0, "action_tm1" : 0, "reward_t" : 0, "observation_t" : 0, "legal_moves_t" : 0, "terminal_t" : 0}, None, 0, None))
         self.exploit_eval_policy = jax.vmap(DQNPolicy.eval_policy, in_axes=(None, None, 0, 0, 0, 0))
         self.exploit_policy = jax.vmap(DQNPolicy.policy, in_axes=(None, None, 0, None, 0, 0, 0))
 
         self.learning_rate = self.params.learning_rate
-        self.buffersize = self.params.experience_buffer_size
+
+        self.buffersizes = []
+        for i in range(len(buffersizes)):
+            for j in range(self.num_unique_parallel):
+                self.buffersizes.append(buffersizes[i]) 
+
+
+        self.lr = onp.zeros(self.num_parallel)
+        for i in range(len(lrs)):
+            for j in range(self.num_unique_parallel):
+                self.lr[(i*self.num_unique_parallel +j)] = self.lrs[i]
+
+        self.alphas = []
+        for i in range(len(alphas)):
+            for j in range(self.num_unique_parallel):
+                self.alphas.append(alphas[i])
+
+        self.lr = -self.lr
+        print('>>>>>>>>>>>>>>>>>>>>>>>>>>>', self.lr, self.buffersizes, self.alphas)
 
         if params.use_priority:
             self.experience = [PriorityBuffer(
                 observation_spec.shape[1] * self.params.history_size,
                 action_spec.num_values,
                 1,
-                params.experience_buffer_size,
-                alpha=self.params.priority_w) for i in range(self.num_parallel)]
+                self.buffersizes[i],
+                alpha=self.alphas[i]) for i in range(self.num_parallel)]
         else:
             self.experience = [ExperienceBuffer(
                 observation_spec.shape[1] * self.params.history_size,
                 action_spec.num_values,
                 1,
-                params.experience_buffer_size) for i in range(self.num_parallel)]
+                self.buffersizes[i]) for i in range(self.num_parallel)]
         self.last_obs = onp.empty(observation_spec.shape)
         self.requires_vectorized_observation = lambda: True
 
@@ -366,12 +421,11 @@ class DQNAgent:
 
         
     def shape_rewards(self, observations, moves):
-        
         if self.reward_shaper is not None:
             shaped_rewards, shape_type = self.reward_shaper.shape(observations[0], 
                                                                   moves)
             return onp.array(shaped_rewards), onp.array(shape_type)
-        return (0, 0)
+        return (onp.zeros(observations[1][0].shape[0]), onp.zeros(observations[1][0].shape[0]))
 
     def update_prio(buffer, indices, prios):
         return buffer.update_priorities(indices, prios)
@@ -382,17 +436,24 @@ class DQNAgent:
         # start_time = time.time()
         if self.params.use_priority:
             sample_indices, prios, c = [], [], []
-            futures = []
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                for i in range(self.num_parallel):
-                    futures.append(executor.submit(self.experience[i].sample_batch, self.params.train_batch_size))
 
-            return_value = [i.result() for i in futures]
-            for _a, _b, _c in return_value:
+            for i in range(self.num_parallel):
+                _samp, _prio, _tra = self.experience[i].sample_batch(self.params.train_batch_size)
+                sample_indices.append(_samp)
+                prios.append(_prio)
+                c.append(_tra._asdict())
 
-                sample_indices.append(_a)
-                prios.extend(_b)
-                c.append(_c._asdict())
+            # futures = []
+            # with concurrent.futures.ThreadPoolExecutor() as executor:
+            #     for i in range(self.num_parallel):
+            #         futures.append(executor.submit(self.experience[i].sample_batch, self.params.train_batch_size))
+
+            # return_value = [i.result() for i in futures]
+            # for _a, _b, _c in return_value:
+
+            #     sample_indices.append(_a)
+            #     prios.extend(_b)
+            #     c.append(_c._asdict())
             prios = onp.asarray(prios).reshape(self.num_parallel, self.params.train_batch_size)
 
             transitions = {}
@@ -411,11 +472,12 @@ class DQNAgent:
             prios = onp.ones((self.num_parallel, self.params.train_batch_size))
         
         # self.total_sample_time += start_time-time.time()
-
+        lr = self.lr
         self.online_params, self.opt_state, tds = self.update_q_parallel(
             self.network,
             self.atoms,
             self.optimizer,
+            self.lr,
             self.online_params,
             self.trg_params,
             self.opt_state,
@@ -424,25 +486,29 @@ class DQNAgent:
             prios,
             self.params.beta_is(self.train_step))
 
-        # start_time = time.time()
+        start_time = time.time()
 
         if self.params.use_priority:
-            with concurrent.futures.ThreadPoolExecutor() as executor:
+            for i, buffer in enumerate(self.experience):
+                buffer.update_priorities(sample_indices[i], onp.abs(tds)[i])
+
+            # with concurrent.futures.ThreadPoolExecutor() as executor:
                 
-                executor.map(self.experience, sample_indices,  onp.abs(tds))
+            #     executor.map(self.experience, sample_indices,  onp.abs(tds))
+
+                # with concurrent.futures.ThreadPoolExecutor() as executor:
+                #     for i in range(self.num_parallel):
+                #         executor.submit(self.experience[i].update_priorities, sample_indices[i], onp.abs(tds[i]))
+                        
                    
-        # self.total_prio_update += start_time-time.time()
+        self.total_prio_update += start_time-time.time()
 
         if self.train_step % self.params.target_update_period == 0:
             self.trg_params = self.online_params
             # print('add_exp took {:.2f} seconds'.format(self.total_add_time))
-            # print('PrioUpdates took {:.2f}s'.format(self.total_prio_update))
+            print('PrioUpdates took {:.2f}s'.format(self.total_prio_update))
             # print('Sampling took {:.2f}s'.format(self.total_sample_time))
         self.train_step += 1
-
-        # print('update took {} seconds'.format(time.time()-start_time))
-
-
 
 
     def create_stacker(self, obs_len, n_states):
@@ -454,7 +520,7 @@ class DQNAgent:
         return f"<rlax_dqn.DQNAgent(params={self.params})>"
 
     def save_attributes(self, path, name):
-        _dict = {'lr': self.learning_rate, 'buffersize': self.buffersize, 'alpha': self.experience[0].alpha}
+        _dict = {'lr': self.lrs, 'buffersize': self.buffersize, 'alpha': self.alpha}
         path = os.path.join(path, name + '.json')
         with open(path, 'w') as fp:
             json.dump(_dict, fp)
@@ -470,14 +536,19 @@ class DQNAgent:
         #  onp.save(join_path(path, "rlax_rainbow_" + fname_part + "_" + str(self.train_step) + "_target.npy"),
         #           self.trg_params)
         # for i, (online, target) in enumerate(zip(self.online_params, self.trg_params)):
-        with open(join_path(path, "rlax_rainbow_" + fname_part + '_{}'.format(i) + "_online.pkl"), 'wb') as of:
-            pickle.dump(online, of)
-        with open(join_path(path, "rlax_rainbow_" + fname_part + '_{}'.format(i) + "_target.pkl"), 'wb') as of:
-            pickle.dump(target, of)
-
-        self.save_attributes(path, fname_part)
+        with open(join_path(path, "rlax_rainbow_" + fname_part + "_online.pkl"), 'wb') as of:
+            pickle.dump(self.online_params, of)
+        with open(join_path(path, "rlax_rainbow_" + fname_part +  "_target.pkl"), 'wb') as of:
+            pickle.dump(self.trg_params, of)
 
 
+
+    def save_min_characteristics(self):
+        characteristics = {'buffersize' : [], 'lr' : [], 'alpha': []}
+        characteristics['buffersize'] = self.buffersizes
+        characteristics['lr'] = self.lrs
+        characteristics['alpha'] = self.alpha
+        return characteristics
 
     def restore_weights(self, online_weights_file, trg_weights_file):
         """Restore online and target network weights from the specified files"""
