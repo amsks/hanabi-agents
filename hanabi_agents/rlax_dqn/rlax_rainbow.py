@@ -466,7 +466,7 @@ class DQNAgent:
                         
             if self.params.use_priority:
                 
-                tds_abs = onp.abs(tds)
+                tds_abs = jax.tree_util.tree_map(onp.array, tds)
                 if self.store_td:
                     for i, td in enumerate(tds_abs):
                         self.drawn_td_abs[i].extend(td)
