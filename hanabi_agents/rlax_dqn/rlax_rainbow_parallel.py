@@ -560,7 +560,9 @@ class DQNAgent:
 
             self.intermediate_indices = self.intermediate_indices[-2:]
             self.intermediate_tds = self.intermediate_tds[-2:]
-        
+        else:
+            print('false')
+            pass
 
 
     def create_stacker(self, obs_len, n_states):
