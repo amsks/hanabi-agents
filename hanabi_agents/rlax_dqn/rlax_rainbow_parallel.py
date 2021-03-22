@@ -532,9 +532,6 @@ class DQNAgent:
             print('PrioUpdates took {:.2f}s'.format(self.total_prio_update))
             print('Part_time_1 took {:.2f}s'.format(self.parttime_update_1), len(self.experience), self.num_parallel, self.num_unique_parallel)
             
-            print('Action hoch alpha took {:.2f}'.format(self.experience[0].hoch_alpha))
-            print('Update Values took {:.2f}'.format(self.experience[0].update_prios))
-            print('Total took {:.2f}'.format(self.experience[0].total_time))
             print(self.train_step)
         self.train_step += 1
 
@@ -542,24 +539,28 @@ class DQNAgent:
     # optimizes CPU/GPU utilization through batching of prio updates and avoiding CPU-Idle time
     # while waiting for the GPU 
     def update_prio(self):
-        start_time = time.time()
-        indices = [[] for i in range(self.num_parallel)]
-        for elem in self.intermediate_indices[:-2]:
-            for i, subset in enumerate(elem):
-                indices[i].extend(subset)
+        if self.params.use_priority:
+            start_time = time.time()
+            indices = [[] for i in range(self.num_parallel)]
+            for elem in self.intermediate_indices[:-2]:
+                for i, subset in enumerate(elem):
+                    indices[i].extend(subset)
 
-        tds_list = []
-        for i, elem in enumerate(self.intermediate_tds[:-2]):
-            tds_list.append(onp.asarray(elem))
-        tds_np = onp.hstack(tds_list)
+            tds_list = []
+            for i, elem in enumerate(self.intermediate_tds[:-2]):
+                tds_list.append(onp.asarray(elem))
+            tds_np = onp.hstack(tds_list)
 
-        for i, buffer in enumerate(self.experience):
-            buffer.update_priorities(indices[i], tds_np[i])
+            for i, buffer in enumerate(self.experience):
+                buffer.update_priorities(indices[i], tds_np[i])
 
+            print('Action hoch alpha took {:.2f}'.format(self.experience[0].hoch_alpha))
+            print('Update Values took {:.2f}'.format(self.experience[0].update_prios))
+            print('Total took {:.2f}'.format(self.experience[0].total_time))
 
-        self.intermediate_indices = self.intermediate_indices[-2:]
-        self.intermediate_tds = self.intermediate_tds[-2:]
-
+            self.intermediate_indices = self.intermediate_indices[-2:]
+            self.intermediate_tds = self.intermediate_tds[-2:]
+        
 
 
     def create_stacker(self, obs_len, n_states):
