@@ -256,6 +256,8 @@ class DQNLearning:
         updates, opt_state_t = optimizer.update(grads, opt_state)
         updates = apply_lr(lr, updates, opt_state)
         online_params_t = optax.apply_updates(online_params, updates)
+        
+
         return online_params_t, opt_state_t, new_prios
     
         
@@ -283,7 +285,7 @@ class DQNAgent:
         self.rng = hk.PRNGSequence(jax.random.PRNGKey(params.seed))
 
         # train 4 models in parallel
-        self.num_unique_parallel = 2
+        self.num_unique_parallel = 4
         self.num_parallel = self.num_unique_parallel * len(lrs)
         self.lrs = lrs
         self.alpha = alphas
@@ -362,10 +364,14 @@ class DQNAgent:
         self.last_obs = onp.empty(observation_spec.shape)
         self.requires_vectorized_observation = lambda: True
 
+        self.intermediate_indices = []
+        self.intermediate_tds = []
 
         self.total_add_time = 0
         self.total_prio_update = 0
         self.total_sample_time = 0
+        self.parttime_update_1 = 0
+        self.max_i = 0
 
     def exploit(self, observations):
         # start_time = time.time()
@@ -486,11 +492,28 @@ class DQNAgent:
             prios,
             self.params.beta_is(self.train_step))
 
+        # time.sleep(0.05)
         start_time = time.time()
 
+        
+        start_time_2 = time.time()
+        # tds = onp.asarray(tds)  
+        self.parttime_update_1 += (time.time() -start_time_2)
+
         if self.params.use_priority:
-            for i, buffer in enumerate(self.experience):
-                buffer.update_priorities(sample_indices[i], onp.abs(tds)[i])
+            self.intermediate_indices.append(sample_indices)
+            self.intermediate_tds.append(tds)
+            # for i, buffer in enumerate(self.experience):
+                
+            #     indices_sampled = sample_indices[i]
+                
+                
+                # tds_abs = onp.abs(tds)[i]
+                # tds_abs = tds[i]
+                # print(tds_abs)
+                
+
+                # buffer.update_priorities(indices_sampled, tds_abs)
 
             # with concurrent.futures.ThreadPoolExecutor() as executor:
                 
@@ -507,8 +530,36 @@ class DQNAgent:
             self.trg_params = self.online_params
             # print('add_exp took {:.2f} seconds'.format(self.total_add_time))
             print('PrioUpdates took {:.2f}s'.format(self.total_prio_update))
-            # print('Sampling took {:.2f}s'.format(self.total_sample_time))
+            print('Part_time_1 took {:.2f}s'.format(self.parttime_update_1), len(self.experience), self.num_parallel, self.num_unique_parallel)
+            
+            print('Action hoch alpha took {:.2f}'.format(self.experience[0].hoch_alpha))
+            print('Update Values took {:.2f}'.format(self.experience[0].update_prios))
+            print('Total took {:.2f}'.format(self.experience[0].total_time))
+            print(self.train_step)
         self.train_step += 1
+
+    # additional function that splits update() in case of priority_buffer==True into two function
+    # optimizes CPU/GPU utilization through batching of prio updates and avoiding CPU-Idle time
+    # while waiting for the GPU 
+    def update_prio(self):
+        start_time = time.time()
+        indices = [[] for i in range(self.num_parallel)]
+        for elem in self.intermediate_indices[:-2]:
+            for i, subset in enumerate(elem):
+                indices[i].extend(subset)
+
+        tds_list = []
+        for i, elem in enumerate(self.intermediate_tds[:-2]):
+            tds_list.append(onp.asarray(elem))
+        tds_np = onp.hstack(tds_list)
+
+        for i, buffer in enumerate(self.experience):
+            buffer.update_priorities(indices[i], tds_np[i])
+
+
+        self.intermediate_indices = self.intermediate_indices[-2:]
+        self.intermediate_tds = self.intermediate_tds[-2:]
+
 
 
     def create_stacker(self, obs_len, n_states):
@@ -528,14 +579,6 @@ class DQNAgent:
     def save_weights(self, path, fname_part, save_attributes = True):
         """Save online and target network weights to the specified path"""
 
-        # TODO save weights using something other than pickle (e.g. numpy + protobuf)
-        #  flat_params, tree_def = jax.tree_util.tree_flatten(self.online_params)
-        #  print(flat_params, tree_def)
-        #  onp.save(join_path(path, "rlax_rainbow_" + fname_part + "_" + str(self.train_step) + "_online.npy"),
-        #           self.online_params)
-        #  onp.save(join_path(path, "rlax_rainbow_" + fname_part + "_" + str(self.train_step) + "_target.npy"),
-        #           self.trg_params)
-        # for i, (online, target) in enumerate(zip(self.online_params, self.trg_params)):
         with open(join_path(path, "rlax_rainbow_" + fname_part + "_online.pkl"), 'wb') as of:
             pickle.dump(self.online_params, of)
         with open(join_path(path, "rlax_rainbow_" + fname_part +  "_target.pkl"), 'wb') as of:
@@ -562,7 +605,6 @@ class DQNAgent:
 
     def get_agent_attributes(self):
         """Retrieves network weights, to copy them over to other models"""
-        # network_weights = self.online_params
         attributes = (self.learning_rate, self.buffersize, self.online_params)
         return attributes
 
@@ -590,4 +632,3 @@ class DQNAgent:
 
         self.experience.change_size(self.buffersize)
 
-        #TODO: implement for priority replay

@@ -5,6 +5,7 @@ from jax import numpy as jnp
 from jax.tree_util import tree_flatten, tree_unflatten, register_pytree_node_class
 
 from collections import namedtuple
+import time
 
 #  from .sum_tree import SumTree
 from sum_tree import SumTreef as SumTree
@@ -18,6 +19,9 @@ class PriorityBuffer(ExperienceBuffer):
         self.max_priority = alpha
         self.min_priority = alpha
         self.alpha = alpha
+        self.hoch_alpha = 0
+        self.update_prios = 0
+        self.total_time = 0
 
     def add_transitions(self,
                         observation_tm1: onp.ndarray,
@@ -46,10 +50,19 @@ class PriorityBuffer(ExperienceBuffer):
         return indices, prios, self[indices]
 
     def update_priorities(self, indices, priorities):
+        start_time = time.time()
         priorities = (priorities + 1e-10) ** self.alpha
+
+        self.hoch_alpha += (time.time() - start_time)
+
         self.max_priority = max(self.max_priority, onp.max(priorities))
         self.min_priority = min(self.min_priority, onp.min(priorities))
+        start_time_2 = time.time()
         self.sum_tree.update_values(indices, priorities)
+
+        self.update_prios += (time.time() - start_time_2)
+        self.total_time += (time.time() -start_time)
+
 
 
     def change_size(self, new_size):
