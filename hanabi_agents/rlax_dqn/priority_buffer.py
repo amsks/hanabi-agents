@@ -9,8 +9,8 @@ class PriorityBuffer(ExperienceBuffer):
     def __init__(self, observation_len: int, capacity: int, alpha: int = 0.6):
         super(PriorityBuffer, self).__init__(observation_len, capacity)
         self.sum_tree = SumTree(capacity)
-        self.max_priority = alpha
-        self.min_priority = alpha
+        self.max_priority = alpha if alpha > 0 else 1
+        self.min_priority = alpha if alpha > 0 else 1
         self.alpha = alpha
 
     def add_transitions(self,
