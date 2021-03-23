@@ -9,8 +9,10 @@ class RlaxRainbowParams(NamedTuple):
     target_update_period: int = 500
     discount: float = 0.99
     epsilon: Union[Callable[[int], float], float] = lambda x: 0.0
+    tau: Union[Callable[[int], float], float] = lambda x: 0.0
     learning_rate: float = 2.5e-4
     layers: List[int] = [512]
+    use_boltzmann_exploration: bool = False
     use_double_q: bool = True
     use_priority: bool = True
     use_distribution: bool = True

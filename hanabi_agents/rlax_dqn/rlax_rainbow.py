@@ -48,12 +48,45 @@ class DQNPolicy:
         num_legal = jnp.sum(legal, axis=-1, keepdims=True)
         uniform_probs = legal / num_legal
         return (1 - epsilon) * probs + epsilon * uniform_probs
+    
+    def _apply_legal_boltzmann(probs, tau, legal):
+        """Mix an arbitrary categorical distribution with a boltzmann distribution"""
+        boltzmann_probs = jnp.where(legal, jnp.exp(probs / tau), 0.)
+        boltzmann_probs = boltzmann_probs / jnp.sum(boltzmann_probs, axis=-1)[:, None]
+        return boltzmann_probs
 
     @staticmethod
     def _argmax_with_random_tie_breaking(preferences):
         """Compute probabilities greedily with respect to a set of preferences."""
         optimal_actions = (preferences == preferences.max(axis=-1, keepdims=True))
         return optimal_actions / optimal_actions.sum(axis=-1, keepdims=True)
+    
+    @staticmethod
+    def legal_softmax(tau=None):
+        """An epsilon-greedy distribution with illegal probabilities set to zero"""
+
+        def sample_fn(key: chex.Array,
+                      preferences: chex.Array,
+                      legal: chex.Array,
+                      tau=tau):
+            probs = DQNPolicy._apply_legal_boltzmann(probs, tau, legal)
+            return DQNPolicy._categorical_sample(key, probs)
+
+        def probs_fn(preferences: chex.Array, legal: chex.Array, tau=tau):
+            return DQNPolicy._apply_legal_boltzmann(probs, tau, legal)
+
+        def logprob_fn(sample: chex.Array,
+                       preferences: chex.Array,
+                       legal: chex.Array,
+                       tau=tau):
+            probs = DQNPolicy._apply_legal_boltzmann(probs, tau, legal)
+            return rlax.base.batched_index(jnp.log(probs), sample)
+
+        def entropy_fn(preferences: chex.Array, legal: chex.Array, epsilon=epsilon):
+            probs = DQNPolicy._apply_legal_boltzmann(probs, tau, legal)
+            return -jnp.nansum(probs * jnp.log(probs), axis=-1)
+
+        return DiscreteDistribution(sample_fn, probs_fn, logprob_fn, entropy_fn)
 
     @staticmethod
     def legal_epsilon_greedy(epsilon=None):
@@ -88,13 +121,15 @@ class DQNPolicy:
 
 
     @staticmethod
-    @partial(jax.jit, static_argnums=(0,1))
+    @partial(jax.jit, static_argnums=(0,1,2))
     def policy(
             network,
-            use_distribution,
+            use_distribution: bool,
+            use_softmax: bool,
             atoms,
             net_params,
             epsilon: float,
+            tau: float,
             key: float,
             obs: chex.Array,
             lms: chex.Array):
@@ -105,7 +140,8 @@ class DQNPolicy:
             use_distribution   -- network has distributional output
             atoms              -- support of distributional output
             net_params         -- parameters (weights) of the network.
-            epsilon            -- proportion of uniform sampling
+            epsilon            -- proportion of uniform sampling for epsilon greedy sampling
+            tau                -- annealing temperature for softmax sampling
             key                -- key for categorical sampling.
             obs                -- observation.
             lm                 -- one-hot encoded legal actions
@@ -126,7 +162,10 @@ class DQNPolicy:
         q_vals = jnp.where(lms, q_vals, -jnp.inf)
 
         # compute actions
-        actions = DQNPolicy.legal_epsilon_greedy(epsilon=epsilon).sample(key, q_vals, lms)
+        if use_softmax:
+            actions = DQNPolicy.legal_softmax(tau=tau).sample(key, q_vals, lms)
+        else:
+            actions = DQNPolicy.legal_epsilon_greedy(epsilon=epsilon).sample(key, q_vals, lms)
         return q_vals, actions
 
     @staticmethod
@@ -259,6 +298,7 @@ class DQNLearning:
 
             mean_loss = jnp.mean(batch_loss * weights_is)
             new_prios = jnp.abs(batch_loss)
+            print(new_prios)
             return mean_loss, new_prios
 
 
@@ -288,10 +328,13 @@ class DQNAgent:
             action_spec,
             params: RlaxRainbowParams = RlaxRainbowParams(),
             reward_shaper = None):
-
+        
         if not callable(params.epsilon):
             eps = params.epsilon
             params = params._replace(epsilon=lambda ts: eps)
+        if not callable(params.tau):
+            tau = params.tau
+            params = params._replace(tau=lambda ts: tau)
         if not callable(params.beta_is):
             beta = params.beta_is
             params = params._replace(beta_is=lambda ts: beta)
@@ -387,10 +430,10 @@ class DQNAgent:
         """
         observations, legal_actions = observations[1]
         _, actions = DQNPolicy.policy(
-            self.network, self.params.use_distribution,
+            self.network, self.params.use_distribution, self.params.use_boltzmann_exploration,
             self.atoms, self.online_params,
-            self.params.epsilon(self.train_step), next(self.rng),
-            observations, legal_actions
+            self.params.epsilon(self.train_step), self.params.tau(self.train_step),
+            next(self.rng), observations, legal_actions
         )
         return jax.tree_util.tree_map(onp.array, actions)
     
@@ -453,10 +496,11 @@ class DQNAgent:
                 self.params.discount,
                 prios,
                 self.params.beta_is(self.train_step))
-    
+
             # update priorities in buffer
             if self.params.use_priority:
-                self.experience.update_priorities(sample_indices, onp.abs(tds))
+                tds = jax.tree_util.tree_map(onp.array, tds)
+                self.experience.update_priorities(sample_indices, tds)
     
             # periodically update target network
             if self.train_step % self.params.target_update_period == 0:
