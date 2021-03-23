@@ -7,7 +7,7 @@ from functools import partial
 from typing import Tuple, List
 from os.path import join as join_path
 import timeit
-
+import copy
 import numpy as onp
 
 import haiku as hk
@@ -306,6 +306,7 @@ class DQNAgent:
         self.n_network = params.n_network
         # for evaluating absolute td errors near start of training
         self.drawn_td_abs = [[] for _ in range(self.n_network)]
+        self.drawn_transitions = []
         self.store_td = True
 
         # Function to build and initialize Q-network. Use Noisy Network or MLP
@@ -468,6 +469,9 @@ class DQNAgent:
                 
                 tds_abs = jax.tree_util.tree_map(onp.array, tds)
                 if self.store_td:
+                    del transitions['observation_tm1']
+                    del transitions['observation_t']
+                    self.drawn_transitions.append(transitions)
                     for i, td in enumerate(tds_abs):
                         self.drawn_td_abs[i].extend(td)
                 self.buffer.update_priorities(sample_indices, tds_abs)
@@ -538,11 +542,13 @@ class DQNAgent:
          
     def get_drawn_tds(self, reset=True, deactivate=True):
         tds = onp.array(self.drawn_td_abs)
+        transitions = copy.deepcopy(self.drawn_transitions)
         if reset:
+            self.drawn_transitions.clear()
             for i in range(self.n_network):
                 self.drawn_td_abs[i].clear()
         self.store_td = not deactivate
-        return tds
+        return tds, transitions
      
     def get_stochasticity(self):
          
