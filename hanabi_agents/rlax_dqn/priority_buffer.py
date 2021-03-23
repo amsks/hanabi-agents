@@ -12,8 +12,8 @@ class PriorityBuffer(ExperienceBuffer):
         self.td_buf = np.empty((n_network, self.capacity, 1), dtype=np.float64)
         
         self.sum_tree = [SumTree(capacity) for _ in range(n_network)]
-        self.max_priority = [alpha for _ in range(n_network)]
-        self.min_priority = [alpha for _ in range(n_network)]
+        self.max_priority = [alpha if alpha > 0 else 1 for _ in range(n_network)]
+        self.min_priority = [alpha if alpha > 0 else 1 for _ in range(n_network)]
         self.alpha = alpha
         
     def add(self, 
