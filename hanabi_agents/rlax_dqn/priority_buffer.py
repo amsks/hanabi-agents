@@ -49,6 +49,10 @@ class PriorityBuffer(ExperienceBuffer):
         prios = (prios + 1e-10) * tree_root_value[:, np.newaxis]
         
         return self[indices], indices, prios
+    
+    def sample_random(self, batch_size):
+        return super(PriorityBuffer, self).sample(batch_size)
+        
 
     def update_priorities(self, indices, tds):
         

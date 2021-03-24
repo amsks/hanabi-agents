@@ -307,6 +307,7 @@ class DQNAgent:
         # for evaluating absolute td errors near start of training
         self.drawn_td_abs = [[] for _ in range(self.n_network)]
         self.drawn_transitions = []
+        self.random_transitions = []
         self.store_td = True
 
         # Function to build and initialize Q-network. Use Noisy Network or MLP
@@ -469,9 +470,13 @@ class DQNAgent:
                 
                 tds_abs = jax.tree_util.tree_map(onp.array, tds)
                 if self.store_td:
+                    random_transitions = self.buffer.sample_random(self.params.train_batch_size)[0]
                     del transitions['observation_tm1']
                     del transitions['observation_t']
+                    del random_transitions['observation_tm1']
+                    del random_transitions['observation_t']
                     self.drawn_transitions.append(transitions)
+                    self.random_transitions.append(random_transitions)
                     for i, td in enumerate(tds_abs):
                         self.drawn_td_abs[i].extend(td)
                 self.buffer.update_priorities(sample_indices, tds_abs)
@@ -502,7 +507,7 @@ class DQNAgent:
             with open(join_path(path, "rlax_rainbow_" + fname_part + "_opt_state.pkl"), 'wb') as of:
                 pickle.dump(jax.tree_util.tree_map(onp.array, self.opt_state), of)
             with open(join_path(path, "rlax_rainbow_" + fname_part + "_experience.pkl"), 'wb') as of:
-                pickle.dump([e.serializable() for e in self.buffer], of)
+                pickle.dump(self.buffer.serializable(), of)
     
     # older versions of haiku store weights as frozendict, convert to mutable dict and then to FlatMapping
     def _compat_restore_weights(self, file_w):
@@ -543,12 +548,14 @@ class DQNAgent:
     def get_drawn_tds(self, reset=True, deactivate=True):
         tds = onp.array(self.drawn_td_abs)
         transitions = copy.deepcopy(self.drawn_transitions)
+        random_transitions = copy.deepcopy(self.random_transitions)
         if reset:
             self.drawn_transitions.clear()
+            self.random_transitions.clear()
             for i in range(self.n_network):
                 self.drawn_td_abs[i].clear()
         self.store_td = not deactivate
-        return tds, transitions
+        return tds, transitions, random_transitions
      
     def get_stochasticity(self):
          
