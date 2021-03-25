@@ -69,21 +69,21 @@ class DQNPolicy:
                       preferences: chex.Array,
                       legal: chex.Array,
                       tau=tau):
-            probs = DQNPolicy._apply_legal_boltzmann(probs, tau, legal)
+            probs = DQNPolicy._apply_legal_boltzmann(preferences, tau, legal)
             return DQNPolicy._categorical_sample(key, probs)
 
         def probs_fn(preferences: chex.Array, legal: chex.Array, tau=tau):
-            return DQNPolicy._apply_legal_boltzmann(probs, tau, legal)
+            return DQNPolicy._apply_legal_boltzmann(preferences, tau, legal)
 
         def logprob_fn(sample: chex.Array,
                        preferences: chex.Array,
                        legal: chex.Array,
                        tau=tau):
-            probs = DQNPolicy._apply_legal_boltzmann(probs, tau, legal)
+            probs = DQNPolicy._apply_legal_boltzmann(preferences, tau, legal)
             return rlax.base.batched_index(jnp.log(probs), sample)
 
-        def entropy_fn(preferences: chex.Array, legal: chex.Array, epsilon=epsilon):
-            probs = DQNPolicy._apply_legal_boltzmann(probs, tau, legal)
+        def entropy_fn(preferences: chex.Array, legal: chex.Array, tau=tau):
+            probs = DQNPolicy._apply_legal_boltzmann(preferences, tau, legal)
             return -jnp.nansum(probs * jnp.log(probs), axis=-1)
 
         return DiscreteDistribution(sample_fn, probs_fn, logprob_fn, entropy_fn)
@@ -162,6 +162,7 @@ class DQNPolicy:
         q_vals = jnp.where(lms, q_vals, -jnp.inf)
 
         # compute actions
+        print('softmax', use_softmax)
         if use_softmax:
             actions = DQNPolicy.legal_softmax(tau=tau).sample(key, q_vals, lms)
         else:
@@ -463,8 +464,7 @@ class DQNAgent:
         """
         if self.reward_shaper is not None:
             shaped_rewards, shape_type = self.reward_shaper.shape(observations[0], 
-                                                                  moves,
-                                                                  self.train_step)
+                                                                  moves)
             return onp.array(shaped_rewards), onp.array(shape_type)
         return (onp.zeros(len(observations[0])), onp.zeros(len(observations[0])))
 

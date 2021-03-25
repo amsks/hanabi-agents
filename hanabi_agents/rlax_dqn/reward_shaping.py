@@ -4,11 +4,25 @@ import numpy as np
 from hanabi_learning_environment import pyhanabi_pybind as pyhanabi
 from collections import Counter
 
+# deprecated, use reward shaper in hanabi learning environment
+# discard shaping contains bugs!
+
 class ShapingType:
     NONE=0
     RISKY=1
     DISCARD_LAST_OF_KIND=2
     CONSERVATIVE=3
+    
+class RewardShapingParams(NamedTuple):
+    
+    # conservative agent
+    shaper: bool = True
+    min_play_probability: float = 0.8
+    w_play_penalty: Union[Callable[[int], float], float] = 0
+    m_play_penalty: float = 0
+    w_play_reward: Union[Callable[[int], float], float] = 0
+    m_play_reward: float = 0
+    penalty_last_of_kind: float = 0
 
 # reward shaping class
 class RewardShaper:
