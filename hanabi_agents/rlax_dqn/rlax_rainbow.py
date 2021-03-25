@@ -16,7 +16,6 @@ import optax
 import jax.numpy as jnp
 import rlax
 import chex
-import ray
 import time
 
 from .experience_buffer import ExperienceBuffer
@@ -415,6 +414,8 @@ class DQNAgent:
         """Resets the optimizer with altered learning rate"""
         self.learning_rate = lr_survivor * (1 + (random.randint(0,1) * 2 - 1) * lr_factor)
         # self.params._replace(learning_rate = new_lr)
+
+        ############################3 check
         self.optimizer = optax.adam(self.learning_rate, eps=3.125e-5)
         self.opt_state = self.optimizer.init(self.online_params)
 

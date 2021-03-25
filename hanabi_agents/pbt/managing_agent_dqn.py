@@ -11,7 +11,6 @@ from typing import Tuple, Dict, List, Union
 import random
 import os
 from dm_env import TimeStep, StepType
-import ray
 import pickle
 import sqlite3
 import time
