@@ -285,7 +285,7 @@ class DQNAgent:
         self.rng = hk.PRNGSequence(jax.random.PRNGKey(params.seed))
 
         # train 4 models in parallel
-        self.num_unique_parallel = 4
+        self.num_unique_parallel = 2
         self.num_parallel = self.num_unique_parallel * len(lrs)
         self.lrs = lrs
         self.alpha = alphas
