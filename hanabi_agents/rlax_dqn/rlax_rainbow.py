@@ -150,19 +150,18 @@ class DQNPolicy:
         # calculate q value from distributional output
         # by calculating mean of distribution
         if use_distribution:
-            logits = network.apply(net_params, None, obs)
+            logits = network.apply(net_params, key, obs)
             probs = jax.nn.softmax(logits, axis=-1)
             q_vals = jnp.mean(probs * atoms, axis=-1)
             
         # q values equal network output
         else:
-            q_vals = network.apply(net_params, None, obs)
+            q_vals = network.apply(net_params, key, obs)
         
         # mask q values of illegal actions
         q_vals = jnp.where(lms, q_vals, -jnp.inf)
 
         # compute actions
-        print('softmax', use_softmax)
         if use_softmax:
             actions = DQNPolicy.legal_softmax(tau=tau).sample(key, q_vals, lms)
         else:
@@ -193,13 +192,13 @@ class DQNPolicy:
         # calculate q value from distributional output
         # by calculating mean of distribution
         if use_distribution:
-            logits = network.apply(net_params, None, obs)
+            logits = network.apply(net_params, key, obs)
             probs = jax.nn.softmax(logits, axis=-1)
             q_vals = jnp.mean(probs * atoms, axis=-1)
             
         # q values equal network output
         else:
-            q_vals = network.apply(net_params, None, obs)
+            q_vals = network.apply(net_params, key, obs)
         
         # mask q values of illegal actions
         q_vals = jnp.where(lms, q_vals, -jnp.inf)
@@ -211,7 +210,8 @@ class DQNLearning:
     @staticmethod
     @partial(jax.jit, static_argnums=(0, 1, 2, 3))
     def update_q(network, optimizer, use_distribution, use_double_q, # static arguments
-                 atoms, online_params, trg_params, opt_state, transitions, discount_t, prios, beta_is):
+                 atoms, online_params, trg_params, opt_state, transitions, discount_t, prios, beta_is,
+                 key_online, key_target, key_selector):
         """Update network weights wrt Q-learning loss.
 
         Args:
@@ -233,9 +233,9 @@ class DQNLearning:
             """
             calculate double q td loss for distributional network
             """
-            q_logits_tm1 = network.apply(online_params, None, obs_tm1)
-            q_logits_t = network.apply(trg_params, None, obs_t)
-            q_logits_sel = network.apply(online_params, None, obs_t)
+            q_logits_tm1 = network.apply(online_params, key_online, obs_tm1)
+            q_logits_t = network.apply(trg_params, key_target, obs_t)
+            q_logits_sel = network.apply(online_params, key_selector, obs_t)
             q_sel = jnp.mean(jax.nn.softmax(q_logits_sel, axis=-1) * atoms, axis=-1)
             # set discount to zero if state terminal
             term_t = term_t.reshape(r_t.shape)
@@ -248,8 +248,8 @@ class DQNLearning:
             """
             calculate q td loss for distributional network
             """
-            q_logits_tm1 = network.apply(online_params, None, obs_tm1)
-            q_logits_t = network.apply(trg_params, None, obs_t)
+            q_logits_tm1 = network.apply(online_params, key_online, obs_tm1)
+            q_logits_t = network.apply(trg_params, key_target, obs_t)
             # set discount to zero if state terminal
             term_t = term_t.reshape(r_t.shape)
             discount_t = jnp.where(term_t, 0, discount_t)
@@ -261,28 +261,28 @@ class DQNLearning:
             """
             calculate double q td loss (no distributional output)
             """
-            q_tm1 = network.apply(online_params, None, obs_tm1)
-            q_t = network.apply(trg_params, None, obs_t)
-            q_t_selector = network.apply(online_params, None, obs_t)
+            q_tm1 = network.apply(online_params, key_online, obs_tm1)
+            q_t = network.apply(trg_params, key_target, obs_t)
+            q_t_selector = network.apply(online_params, key_selector, obs_t)
             # set discount to zero if state terminal
             term_t = term_t.reshape(r_t.shape)
             discount_t = jnp.where(term_t, 0, discount_t)
             batch_error = jax.vmap(rlax.double_q_learning, in_axes=(0, 0, 0, 0, 0, 0))
             td_errors = batch_error(q_tm1, a_tm1, r_t, discount_t, q_t, q_t_selector)
-            return td_errors
+            return td_errors**2
         
         def q_td(online_params, trg_params, obs_tm1, a_tm1, r_t, obs_t, term_t, discount_t):
             """
             calculate q td loss (no distributional output)
             """
-            q_tm1 = network.apply(online_params, None, obs_tm1)
-            q_t = network.apply(trg_params, None, obs_t)
+            q_tm1 = network.apply(online_params, key_online, obs_tm1)
+            q_t = network.apply(trg_params, key_target, obs_t)
             # set discount to zero if state terminal
             term_t = term_t.reshape(r_t.shape)
             discount_t = jnp.where(term_t, 0, discount_t)
             batch_error = jax.vmap(rlax.q_learning, in_axes=(0, 0, 0, 0, 0,))
             td_errors = batch_error(q_tm1, a_tm1, r_t, discount_t, q_t)
-            return td_errors
+            return td_errors**2
 
         def loss(online_params, trg_params, obs_tm1, a_tm1, r_t, obs_t, term_t, discount_t, prios):
             weights_is = (1. / prios).astype(jnp.float32) ** beta_is
@@ -495,7 +495,10 @@ class DQNAgent:
                 transitions,
                 self.params.discount,
                 prios,
-                self.params.beta_is(self.train_step))
+                self.params.beta_is(self.train_step),
+                next(self.rng),
+                next(self.rng),
+                next(self.rng))
 
             # update priorities in buffer
             if self.params.use_priority:
