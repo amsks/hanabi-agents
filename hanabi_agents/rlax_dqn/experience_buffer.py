@@ -26,7 +26,7 @@ class ExperienceBuffer:
             return list(range(self.oldest_entry, max_entry))
         part1 = list(range(self.oldest_entry, self.capacity)) # end of buffer
         part2 = list(range(max_entry - self.capacity)) # start of buffer
-        return  + part1 + part2
+        return  part1 + part2
 
     def add_transitions(self,
                         observation_tm1: np.ndarray,
