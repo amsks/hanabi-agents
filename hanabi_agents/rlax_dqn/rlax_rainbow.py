@@ -209,9 +209,24 @@ class DQNPolicy:
 class DQNLearning:
     @staticmethod
     @partial(jax.jit, static_argnums=(0, 1, 2, 3))
-    def update_q(network, optimizer, use_distribution, use_double_q, # static arguments
-                 atoms, online_params, trg_params, opt_state, transitions, discount_t, prios, beta_is,
-                 key_online, key_target, key_selector):
+    def update_q(   network, 
+                    optimizer, 
+                    use_distribution, 
+                    use_double_q, 
+                    atoms, 
+                    online_params, 
+                    trg_params, 
+                    opt_state, 
+                    transitions, 
+                    discount_t, 
+                    prios, 
+                    beta_is,
+                    key_online, 
+                    key_target, 
+                    key_selector,
+                    factor,
+                    diversity
+                    ):
         """Update network weights wrt Q-learning loss.
 
         Args:
@@ -284,7 +299,20 @@ class DQNLearning:
             td_errors = batch_error(q_tm1, a_tm1, r_t, discount_t, q_t)
             return td_errors**2
 
-        def loss(online_params, trg_params, obs_tm1, a_tm1, r_t, obs_t, term_t, discount_t, prios):
+
+        ## Called to update the gradient
+        def loss(   online_params, 
+                    trg_params, 
+                    obs_tm1, 
+                    a_tm1, 
+                    r_t, 
+                    obs_t, 
+                    term_t, 
+                    discount_t, 
+                    prios, 
+                    diversity = 0, 
+                    factor = 1
+                ):
             weights_is = (1. / prios).astype(jnp.float32) ** beta_is
             weights_is /= jnp.max(weights_is)
             
@@ -297,11 +325,15 @@ class DQNLearning:
                 online_params, trg_params, obs_tm1, a_tm1, r_t, obs_t, term_t, discount_t
             )
 
-            mean_loss = jnp.mean(batch_loss * weights_is)
+            # Entry point for diversity 
+            # Plan of Action --> Evaluate Diversity on 10 observations and add a regularizer
+            mean_loss = jnp.mean(batch_loss * weights_is + factor * diversity)  
+            
             new_prios = jnp.abs(batch_loss)
+            
             print(new_prios)
+            
             return mean_loss, new_prios
-
 
         grad_fn = jax.grad(loss, has_aux=True)
         grads, new_prios = grad_fn(
@@ -313,12 +345,15 @@ class DQNLearning:
             transitions.observation_t,
             transitions.terminal_t,
             discount_t,
-            prios
+            prios, 
+            factor, 
+            diversity
         )
 
         
         updates, opt_state_t = optimizer.update(grads, opt_state)
         online_params_t = optax.apply_updates(online_params, updates)
+        
         return online_params_t, opt_state_t, new_prios
 
 
@@ -468,8 +503,11 @@ class DQNAgent:
             return onp.array(shaped_rewards), onp.array(shape_type)
         return (onp.zeros(len(observations[0])), onp.zeros(len(observations[0])))
 
-    def update(self):
-        """Make one training step.
+    def update( self, 
+                factor = 1, 
+                diversity =0 
+            ):
+        """Make one training step. This function calls the update_q function for the loss update
         """
         
         if not self.params.fixed_weights:
@@ -498,7 +536,10 @@ class DQNAgent:
                 self.params.beta_is(self.train_step),
                 next(self.rng),
                 next(self.rng),
-                next(self.rng))
+                next(self.rng),
+                factor,
+                diversity
+                )
 
             # update priorities in buffer
             if self.params.use_priority:
