@@ -8,19 +8,17 @@ import numpy as np
 import haiku as hk
 
 
-class NoisyLinear(hk.Module):
-  """Noisy Linear module."""
+class Linear(hk.Module):
+  """Linear module."""
 
   def __init__(
             self,
             output_size: int,
+            #rng: jax.random.PRNGKey,
             with_bias: bool = True,
-            w_mu_init: Optional[hk.initializers.Initializer] = None,
-            b_mu_init: Optional[hk.initializers.Initializer] = None,
-            w_sigma_init: Optional[hk.initializers.Initializer] = None,
-            b_sigma_init: Optional[hk.initializers.Initializer] = None,
+            w_init: Optional[hk.initializers.Initializer] = None,
+            b_init: Optional[hk.initializers.Initializer] = None,
             name: Optional[str] = None,
-            factorized_noise: bool = False
   ):
     """Constructs the Linear module.
     Args:
@@ -33,14 +31,12 @@ class NoisyLinear(hk.Module):
       name: Name of the module.
     """
     super().__init__(name=name)
+    #self.rng = hk.PRNGSequence(rng)
     self.input_size = None
     self.output_size = output_size
     self.with_bias = with_bias
-    self.w_mu_init = w_mu_init
-    self.b_mu_init = b_mu_init or jnp.zeros
-    self.w_sigma_init = w_sigma_init
-    self.b_sigma_init = b_sigma_init or jnp.zeros
-    self.factorized = factorized_noise
+    self.w_init = w_mu_init
+    self.b_init = b_mu_init or jnp.zeros
 
   def __call__(self, inputs: jnp.ndarray) -> jnp.ndarray:
     if not inputs.shape:
@@ -50,67 +46,35 @@ class NoisyLinear(hk.Module):
     output_size = self.output_size
     dtype = inputs.dtype
 
-    w_mu_init = self.w_mu_init
-    w_sigma_init = self.w_sigma_init
+    w_init = self.w_init
     
-    # for initialization of weights
-    if self.factorized:
-        val_mu = 1. / np.sqrt(self.input_size)
-        val_sigma = 0.5 / np.sqrt(self.input_size)
-    else:
-        val_mu = np.sqrt(3 / self.input_size)
-        val_sigma = 0.017
+    if w_init is None:
+      stddev = 2. / np.sqrt(self.input_size)
+      w_init = hk.initializers.TruncatedNormal(stddev=stddev)
+    w = hk.get_parameter("w", [input_size, output_size], dtype, init=w_init)
+    
+    out = jnp.dot(inputs, w)
 
-    # init weights mu 
-    if w_mu_init is None:
-        w_mu_init = hk.initializers.RandomUniform(minval=-val_mu, maxval=val_mu)
-    w_mu = hk.get_parameter("w_mu", [input_size, output_size], dtype, init=w_mu_init)
-    
-    # init weights sigma
-    if w_sigma_init is None:
-        w_sigma_init = hk.initializers.Constant(val_sigma)
-    w_sigma = hk.get_parameter("w_sigma", [input_size, output_size], dtype, init=w_sigma_init)
-    
-    # calculate noise
-    if self.factorized:
-        e_noise_input = jax.random.normal(hk.next_rng_key(), (w_sigma.shape[0], 1))
-        e_noise_output = jax.random.normal(hk.next_rng_key(), (1, w_sigma.shape[1]))
-        e_noise_input = jnp.multiply(jnp.sign(e_noise_input), jnp.sqrt(jnp.abs(e_noise_input)))
-        e_noise_output = jnp.multiply(jnp.sign(e_noise_output), jnp.sqrt(jnp.abs(e_noise_output)))
-        w_noise = jnp.matmul(e_noise_input, e_noise_output)
-    else:
-        w_noise = jax.random.normal(hk.next_rng_key(), w_sigma.shape)
-        
-    # calculate output
-    out_noisy = jnp.dot(inputs, jnp.add(w_mu, jnp.multiply(w_sigma, w_noise)))
-    
-    # add bias
     if self.with_bias:
-        b_mu = hk.get_parameter("b_mu", [self.output_size], dtype, init=self.b_mu_init)
-        b_sigma = hk.get_parameter("b_sigma", [self.output_size], dtype, init=self.b_sigma_init)
-        b_mu = jnp.broadcast_to(b_mu, out_noisy.shape)
-        b_sigma = jnp.broadcast_to(b_sigma, out_noisy.shape)
-        b_noise = e_noise_output if self.factorized else jax.random.normal(hk.next_rng_key(), b_sigma.shape)
-        out_noisy = out_noisy + jnp.add(b_mu, jnp.multiply(b_sigma, b_noise))
+      b = hk.get_parameter("b_mu", [self.output_size], dtype, init=self.b_init)
+      b = jnp.broadcast_to(b, out.shape)
+      out = out + b
       
-    return out_noisy
+    return out
 
 
-class NoisyMLP(hk.Module):
+class MLP(hk.Module):
   """A multi-layer perceptron module."""
 
   def __init__(
       self,
       output_sizes: Iterable[int],
       with_bias=True,
-      w_mu_init: Optional[hk.initializers.Initializer] = None,
-      b_mu_init: Optional[hk.initializers.Initializer] = None,
-      w_sigma_init: Optional[hk.initializers.Initializer] = None,
-      b_sigma_init: Optional[hk.initializers.Initializer] = None,
+      w_init: Optional[hk.initializers.Initializer] = None,
+      b_init: Optional[hk.initializers.Initializer] = None,
       activation: Callable[[jnp.ndarray], jnp.ndarray] = jax.nn.relu,
       activate_final: bool = False,
       name: Optional[str] = None,
-      factorized_noise: bool = False
   ):
     """Constructs an MLP.
     Args:
@@ -127,27 +91,21 @@ class NoisyMLP(hk.Module):
       ValueError: If with_bias is False and b_init is not None.
     """
 
+    #self.rng = jax.random.PRNGKey(seed)
     super().__init__(name=name)
     self.with_bias = with_bias
-    self.w_mu_init = w_mu_init
-    self.b_mu_init = b_mu_init
-    self.w_sigma_init = w_sigma_init
-    self.b_sigma_init = b_sigma_init
+    self.w_init = w_mu_init
+    self.b_init = b_mu_init
     self.activation = activation
     self.activate_final = activate_final
-    self.factorized = factorized_noise
     layers = []
     for index, output_size in enumerate(output_sizes):
-        layers.append(NoisyLinear(
-            output_size=output_size,
-            w_mu_init=w_mu_init,
-            b_mu_init=b_mu_init,
-            w_sigma_init=w_sigma_init,
-            b_sigma_init=b_sigma_init,
-            with_bias=with_bias,
-            name="noisy_linear_%d" % index,
-            factorized_noise=self.factorized)
-        )
+      layers.append(Linear(
+          output_size=output_size,
+          w_init=w_init,
+          b_init=b_init,
+          with_bias=with_bias,
+          name="noisy_linear_%d" % index))
     self.layers = tuple(layers)
 
   def __call__(
@@ -217,12 +175,9 @@ class NoisyMLP(hk.Module):
 
     return NoisyMLP(
         output_sizes=(layer.input_size for layer in reversed(self.layers)),
-        w_mu_init=self.w_mu_init,
-        b_mu_init=self.b_mu_init,
-        w_sigma_init=self.w_sigma_init,
-        b_sigma_init=self.b_sigma_init,
+        w_init=self.w_mu_init,
+        b_init=self.b_mu_init,
         with_bias=self.with_bias,
         activation=self.activation,
         activate_final=activate_final,
-        name=name,
-        factorized_noise=self.factorized)
+        name=name)

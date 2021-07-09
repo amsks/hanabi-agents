@@ -84,8 +84,8 @@ class PriorityBuffer(ExperienceBuffer):
         self.min_priority = lst_serializable[1][1]
         self.alpha = lst_serializable[1][2]
         self.capacity = lst_serializable[1][3]
-        tree_index = range(capacity)
-        self.sum_tree = [SumTree(capacity) for _ in range(self.n_network)]
+        tree_index = range(self.capacity)
+        self.sum_tree = [SumTree(self.capacity) for _ in range(self.n_network)]
         for i in range(self.n_network):
             self.sum_tree[i].update_values(tree_index, lst_serializable[1][4][i])
         
