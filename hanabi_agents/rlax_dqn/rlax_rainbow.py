@@ -247,9 +247,24 @@ class DQNLearning:
     
     @staticmethod
     @partial(jax.jit, static_argnums=(0, 2, 11, 12))
-    def update_q(network, atoms, optimizer, lr, online_params, trg_params, opt_state,
-                 transitions, discount_t, prios, beta_is, use_double_q, use_distribution, 
-                 key_online, key_target, key_selector): 
+    def update_q(   network, 
+                    atoms, 
+                    optimizer, 
+                    lr, 
+                    online_params, 
+                    trg_params, 
+                    opt_state,
+                    transitions, 
+                    discount_t, 
+                    prios, 
+                    beta_is, 
+                    use_double_q, 
+                    use_distribution, 
+                    key_online, 
+                    key_target, 
+                    key_selector,
+                    factor = 1,
+                    diversity = 0): 
         """Update network weights wrt Q-learning loss.
 
         Args:
@@ -329,7 +344,19 @@ class DQNLearning:
             td_errors = batch_error(q_tm1, a_tm1, r_t, discount_t, q_t)
             return td_errors**2
 
-        def loss(online_params, trg_params, obs_tm1, a_tm1, r_t, obs_t, term_t, discount_t, prios):
+        def loss(   online_params, 
+                    trg_params, 
+                    obs_tm1, 
+                    a_tm1, 
+                    r_t, 
+                    obs_t, 
+                    term_t, 
+                    discount_t, 
+                    prios,
+                    factor = 1,
+                    diversity = 0   ):
+            
+            
             
             # importance sampling
             weights_is = (1. / prios).astype(jnp.float32) ** beta_is
@@ -345,7 +372,7 @@ class DQNLearning:
             )
 
             # importance sampling
-            mean_loss = jnp.mean(batch_loss * weights_is)
+            mean_loss = jnp.mean(batch_loss * weights_is + factor * diversity)
             if use_distribution:
                 new_prios = jnp.abs(batch_loss)
             else: 
@@ -363,7 +390,9 @@ class DQNLearning:
             transitions["observation_t"],
             transitions["terminal_t"],
             discount_t,
-            prios
+            prios,
+            factor,
+            diversity
         )
 
         updates, opt_state_t = optimizer.update(grads, opt_state)
@@ -500,8 +529,8 @@ class DQNAgent:
 
         # vmapped functions for parallel training of n_networks of agents
         self.parallel_update = jax.vmap(self.update_q, in_axes=(None, None, None, 0, 0, 0, 0, 
-                                                               {"observation_tm1" : 0, "action_tm1" : 0, "reward_t" : 0, "observation_t" : 0, "terminal_t" : 0},
-                                                               None, 0, None, None, None, 0, 0, 0))
+                                                                {"observation_tm1" : 0, "action_tm1" : 0, "reward_t" : 0, "observation_t" : 0, "terminal_t" : 0},
+                                                                None, 0, None, None, None, 0, 0, 0))
         self.parallel_eval_exploit = jax.vmap(DQNPolicy.eval_policy, in_axes=(None, None, None, 0, 0, 0, 0))
         self.parallel_eval = jax.vmap(DQNPolicy.policy, in_axes=(None, None, None, None, 0, None, None, 0, 0, 0))
 
@@ -522,27 +551,26 @@ class DQNAgent:
                 jax.tree_util.tree_map(onp.array, q_values).flatten())
 
     def explore(self, observations):
-        if self.params.pbt == True:
-            if self.train_step % 300 == 0:
-                self.past_obs = onp.roll(self.past_obs, -int(observations[1][0].shape[0]), axis=0)
-                self.past_obs[-int(observations[1][0].shape[0]):, :] = observations[1][0]
-                self.past_lms = onp.roll(self.past_lms, -int(observations[1][1].shape[0]), axis=0)
-                self.past_lms[-int(observations[1][1].shape[0]):, :] = observations[1][1]
+        if self.params.pbt == True and self.train_step % 300 == 0:
+            self.past_obs = onp.roll(self.past_obs, -int(observations[1][0].shape[0]), axis=0)
+            self.past_obs[-int(observations[1][0].shape[0]):, :] = observations[1][0]
+            self.past_lms = onp.roll(self.past_lms, -int(observations[1][1].shape[0]), axis=0)
+            self.past_lms[-int(observations[1][1].shape[0]):, :] = observations[1][1]
 
         observations, legal_actions = observations[1]
-        
+
         obs = observations.reshape(self.n_network, -1, observations.shape[1])
         vla = legal_actions.reshape(self.n_network, -1, legal_actions.shape[1])
         keys = onp.array([onp.random.randint(2147483647, size = 2, dtype='uint32') for _ in range(self.n_network)])
-        
-        
+
+
         _, actions = self.parallel_eval(
             self.network, self.params.use_distribution, self.params.use_boltzmann_exploration,
             self.atoms, self.online_params, 
             self.params.epsilon(self.train_step), self.params.tau(self.train_step), 
             keys, obs, vla
         )
-        
+
         return jax.tree_util.tree_map(onp.array, actions).flatten()
     
     def add_experience_first(self, observations, step_types):
@@ -622,17 +650,6 @@ class DQNAgent:
             if self.params.use_priority:
                 
                 tds_abs = jax.tree_util.tree_map(onp.array, tds)
-                # if self.store_td:
-                #     print('store_td TRUE')
-                #     random_transitions = self.buffer[0].sample_random(self.params.train_batch_size)[0]
-                #     del transitions['observation_tm1']
-                #     del transitions['observation_t']
-                #     del random_transitions['observation_tm1']
-                #     del random_transitions['observation_t']
-                #     self.drawn_transitions.append(transitions)
-                #     self.random_transitions.append(random_transitions)
-                #     for i, td in enumerate(tds_abs):
-                #         self.drawn_td_abs[i].extend(td)
                 for i in range(self.n_network):
                     self.buffer[i].update_priorities(sample_indices[i], tds_abs[i])
 
