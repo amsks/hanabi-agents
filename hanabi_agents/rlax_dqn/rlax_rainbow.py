@@ -547,8 +547,8 @@ class DQNAgent:
                 0, 
                 0, 
                 0,
-                0,
-                0
+                None,
+                None
             ))
         
         self.parallel_eval_exploit = jax.vmap(
