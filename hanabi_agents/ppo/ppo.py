@@ -46,23 +46,6 @@ print("=========================================================================
 
 ################################## PPO Policy ##################################
 
-# TODO Replace with Experience buffer
-class RolloutBuffer:
-    def __init__(self):
-        self.actions = []
-        self.states = []
-        self.logprobs = []
-        self.rewards = []
-        self.is_terminals = []
-
-    def clear(self):
-        del self.actions[:]
-        del self.states[:]
-        del self.logprobs[:]
-        del self.rewards[:]
-        del self.is_terminals[:]
-
-
 class ActorCritic(nn.Module):
 
 	def __init__(
@@ -95,7 +78,10 @@ class ActorCritic(nn.Module):
 	def forward(self):
 		raise NotImplementedError
 
-	def act(self, state):
+	# TODO Define Types
+	def act(	self, 
+				obs,
+				lms	):
 		"""
 			An action is taken by passing the state through the actor network
 
@@ -111,8 +97,13 @@ class ActorCritic(nn.Module):
 
 		# Pass the state through the actor network
 		# to get the action probabilities
-		action_probs = self.actor(state)
+		action_probs = self.actor(obs)
 		
+		# NOTE Jugaad 
+		# Mask illegal actions in the spec with 0 probability
+		action_probs = np.where(lms, action_probs.detach(), 0)
+		# action_probs = orch.FloatTensor(action_probs).to(device)
+
 		# Make a categorical distribution of the 
 		# action probabilities
 		dist = Categorical(action_probs)
@@ -125,9 +116,12 @@ class ActorCritic(nn.Module):
 
 		return action.detach(), action_logprob.detach()
 
-	def evaluate(self, state, action):
+	# TODO Define types
+	def evaluate(	self, 
+					obs, 
+					action	):
 		"""
-			Evaluate a state-action pair 
+			Evaluate a observation-action pair 
 
 			Args: 
 				state	: 	Next state of the environment 
@@ -140,7 +134,7 @@ class ActorCritic(nn.Module):
 		"""
 		
 		# Get action probability by passing the state through the actor network 
-		action_probs = self.actor(state)
+		action_probs = self.actor(obs)
 		
 		# Make a categorical distribution of actions
 		dist = Categorical(action_probs)
@@ -151,10 +145,10 @@ class ActorCritic(nn.Module):
 		# Get the entropy of this distribution
 		dist_entropy = dist.entropy()
 
-		# Pass the state through the critic to get the state value
-		state_values = self.critic(state)
+		# Pass the observation through the critic to get the state value
+		obs_values = self.critic(obs)
 
-		return action_logprobs, state_values, dist_entropy
+		return action_logprobs, obs_values, dist_entropy
 
 
 class PPO:
@@ -175,11 +169,11 @@ class PPO:
 		self.K_epochs = params.K_epochs
 
 		self.observation_len = observation_spec.shape[1] * self.params.history_size
-		# TODO Replace with Experience Buffer 
+		
 		self.buffer = ExperienceBuffer(
 			# shape of observation
 			observation_len=self.observation_len,
-			capacity = params.experience_buffer_size  # buffer size
+			capacity = params.experience_buffer_size 
 		)
 
 		# We require vectorized observations from the game
@@ -189,7 +183,7 @@ class PPO:
 		self.state_dim = np.zeros(
 					(observation_spec.shape[0], observation_spec.shape[1]
 						* self.params.history_size),
-					dtype=onp.float16
+					dtype=np.float16
 				)
 		self.action_dim = action_spec.num_values
 
@@ -219,8 +213,6 @@ class PPO:
 		# Set the error type. NOTE Maybe can be extended to other losse ? 
 		self.MseLoss = nn.MSELoss()
 
-	# TODO change state to observations
-	# TODO handle legal actions
 	def exploit(self, observations):
 		"""
 			Select an action from the current state using the current policy
@@ -243,13 +235,16 @@ class PPO:
 
 			# Act on the current policy to get the action 
 			# and the log probabilities
-			action, action_logprob = self.policy_old.act(observations)
+			action, action_logprob = self.policy_old.act(	
+										obs =observations,
+										lms=legal_actions	
+										)
 
 		return (action.item(), action_logprob)
 
 	# TODO can we use a different policy for exploration ?
 	# TODO Change state to observations
-	def explore(self, state):
+	def explore(self, observations):
 		"""
 		Select an action from the current state using the current policy
 
@@ -266,12 +261,15 @@ class PPO:
 		# the backward function for selection
 		with torch.no_grad():
 
-			# Convert the state to the appropriate tensor
+			# Convert the observations to the appropriate tensor
 			observations = torch.FloatTensor(observations).to(device)
 
 			# Act on the current policy to get the action
 			# and the log probabilities
-			action, action_logprob = self.policy_old.act(observations)
+			action, action_logprob = self.policy_old.act(
+											obs=observations,
+											lms=legal_actions
+										)
 
 		return (action.item(), action_logprob)
 
@@ -361,11 +359,9 @@ class PPO:
 		# Copy new weights into old policy
 		self.policy_old.load_state_dict(self.policy.state_dict())
 
-		# TODO replace by experience buffer 
 		# clear buffer
 		self.clear_buffer()
 
-	# TODO integrate log probabilities
 	def add_experience(
 			self, 
 			observation_tm1: np.ndarray,
@@ -389,8 +385,8 @@ class PPO:
 		
 		"""
 
-		obs_vec_tm1 = observations_tm1[1][0]
-		obs_vec_t = observations_t[1][0]
+		obs_vec_tm1 = observation_tm1[1][0]
+		log_probs_tm1 = observation_t[1][0]
 
 
 		actions = action_tm1[0]
@@ -400,8 +396,8 @@ class PPO:
 			observation_tm1=obs_vec_tm1,
 			action_tm1=actions.reshape(-1, 1),
 			log_probs_tm1=log_probs_tm1.reshape(-1, 1),
-			reward_t=rewards_t,
-			observation_t=obs_vec_t,
+			reward_t=reward_t,
+			observation_t=obs_vec_tm1,
 			terminal_t=terminal_t)
 
 	def create_stacker(

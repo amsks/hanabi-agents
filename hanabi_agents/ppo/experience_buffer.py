@@ -10,6 +10,7 @@ Transition = namedtuple(
     "Transition",
     [   "observation_tm1", 
         "action_tm1", 
+        "log_probs_tm1",
         "reward_t", 
         "observation_t", 
         "terminal_t"
@@ -48,13 +49,13 @@ class ExperienceBuffer:
         part2 = list(range(max_entry - self.capacity))  # start of buffer
         return part1 + part2
 
-    def add_transitions(self,
-                        observation_tm1: np.ndarray,
-                        action_tm1: np.ndarray,
-                        log_probs_tm1: np.ndarray,
-                        reward_t: np.ndarray,
-                        observation_t: np.ndarray,
-                        terminal_t: np.ndarray):
+    def add_transitions(    self,
+                            observation_tm1: np.ndarray,
+                            action_tm1: np.ndarray,
+                            log_probs_tm1: np.ndarray,
+                            reward_t: np.ndarray,
+                            observation_t: np.ndarray,
+                            terminal_t: np.ndarray  ):
         """Add a transition to buffer.
         Args:
             observation_tm1 -- source observation. shape (batch_size, observation_len)
