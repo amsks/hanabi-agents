@@ -106,10 +106,10 @@ class DQNPolicy:
     def legal_epsilon_greedy(epsilon=None):
         """An epsilon-greedy distribution with illegal probabilities set to zero"""
 
-        def sample_fn(key: chex.Array,
-                      preferences: chex.Array,
-                      legal: chex.Array,
-                      epsilon=epsilon):
+        def sample_fn(  key: chex.Array,
+                        preferences: chex.Array,
+                        legal: chex.Array,
+                        epsilon=epsilon):
             probs = DQNPolicy._argmax_with_random_tie_breaking(preferences)
             probs = DQNPolicy._mix_with_legal_uniform(probs, epsilon, legal)
             return DQNPolicy._categorical_sample(key, probs)
@@ -118,10 +118,10 @@ class DQNPolicy:
             probs = DQNPolicy._argmax_with_random_tie_breaking(preferences)
             return DQNPolicy._mix_with_legal_uniform(probs, epsilon, legal)
 
-        def logprob_fn(sample: chex.Array,
-                       preferences: chex.Array,
-                       legal: chex.Array,
-                       epsilon=epsilon):
+        def logprob_fn( sample: chex.Array,
+                        preferences: chex.Array,
+                        legal: chex.Array,
+                        epsilon=epsilon):
             probs = DQNPolicy._argmax_with_random_tie_breaking(preferences)
             probs = DQNPolicy._mix_with_legal_uniform(probs, epsilon, legal)
             return rlax.base.batched_index(jnp.log(probs), sample)
@@ -137,20 +137,20 @@ class DQNPolicy:
     def legal_softmax(tau=None):
         """An epsilon-greedy distribution with illegal probabilities set to zero"""
 
-        def sample_fn(key: chex.Array,
-                      preferences: chex.Array,
-                      legal: chex.Array,
-                      tau=tau):
+        def sample_fn(  key: chex.Array,
+                        preferences: chex.Array,
+                        legal: chex.Array,
+                        tau=tau):
             probs = DQNPolicy._apply_legal_boltzmann(preferences, tau, legal)
             return DQNPolicy._categorical_sample(key, probs)
 
         def probs_fn(preferences: chex.Array, legal: chex.Array, tau=tau):
             return DQNPolicy._apply_legal_boltzmann(preferences, tau, legal)
 
-        def logprob_fn(sample: chex.Array,
-                       preferences: chex.Array,
-                       legal: chex.Array,
-                       tau=tau):
+        def logprob_fn( sample: chex.Array,
+                        preferences: chex.Array,
+                        legal: chex.Array,
+                        tau=tau):
             probs = DQNPolicy._apply_legal_boltzmann(preferences, tau, legal)
             return rlax.base.batched_index(jnp.log(probs), sample)
 
@@ -596,13 +596,15 @@ class DQNAgent:
     def shape_rewards(self, observations, moves):
         
         if self.reward_shaper is not None:
-            shaped_rewards, shape_type = self.reward_shaper.shape(observations[0], 
-                                                                  moves,
-                                                                  self.train_step)
+            shaped_rewards, shape_type = self.reward_shaper.shape(  observations[0], 
+                                                                    moves,
+                                                                    self.train_step)
             return onp.array(shaped_rewards), onp.array(shape_type)
         return (onp.zeros(len(observations[0])), onp.zeros(len(observations[0])))
 
-    def update(self):
+    def update( self,
+                factor = 1.,
+                diversity = 0):
         """Make one training step.
         """
         
@@ -645,7 +647,9 @@ class DQNAgent:
                 self.params.use_distribution,
                 keys_online,
                 keys_target,
-                keys_sel)
+                keys_sel,
+                factor,
+                diversity)
                         
             if self.params.use_priority:
                 

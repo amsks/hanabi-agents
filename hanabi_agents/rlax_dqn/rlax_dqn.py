@@ -142,8 +142,15 @@ class DQNPolicy:
 class DQNLearning:
     @staticmethod
     @partial(jax.jit, static_argnums=(0, 1))
-    def update_q(network, optimizer, online_params, trg_params, opt_state,
-                 transitions, discount_t, weights_is, importance_beta):
+    def update_q(   network, 
+                    optimizer, 
+                    online_params, 
+                    trg_params, 
+                    opt_state,
+                    transitions, 
+                    discount_t, 
+                    weights_is, 
+                    importance_beta):
         """Update network weights wrt Q-learning loss.
 
         Args:
@@ -208,104 +215,29 @@ class DQNLearning:
         #  tds = jax.vmap(double_q_learning_td, in_axes=(None, None, 0, 0, 0, 0, 0, 0, None))(
         #          online_params, trg_params, transitions.observation_tm1, transitions.action_tm1[:, 0], transitions.reward_t[:, 0], transitions.observation_t, transitions.legal_moves_t, transitions.terminal_t, discount_t)
 
-        td_errors = double_q_learning_td(online_params, trg_params,
-                                         transitions.observation_tm1,
-                                         transitions.action_tm1[:, 0],
-                                         transitions.reward_t[:, 0],
-                                         transitions.observation_t,
-                                         transitions.legal_moves_t,
-                                         transitions.terminal_t,
-                                         discount_t)
+        td_errors = double_q_learning_td(   online_params, trg_params,
+                                            transitions.observation_tm1,
+                                            transitions.action_tm1[:, 0],
+                                            transitions.reward_t[:, 0],
+                                            transitions.observation_t,
+                                            transitions.legal_moves_t,
+                                            transitions.terminal_t,
+                                            discount_t)
 
-        dloss_dtheta = jax.grad(loss)(online_params, trg_params,
-                                      transitions.observation_tm1,
-                                      transitions.action_tm1[:, 0],
-                                      transitions.reward_t[:, 0],
-                                      transitions.observation_t,
-                                      transitions.legal_moves_t,
-                                      transitions.terminal_t,
-                                      discount_t,
-                                      weights_is)
+        dloss_dtheta = jax.grad(loss)(  online_params, trg_params,
+                                        transitions.observation_tm1,
+                                        transitions.action_tm1[:, 0],
+                                        transitions.reward_t[:, 0],
+                                        transitions.observation_t,
+                                        transitions.legal_moves_t,
+                                        transitions.terminal_t,
+                                        discount_t,
+                                        weights_is)
         #  print(dloss_dtheta)
         #  dloss_dtheta = jax.grad(loss)(td_errors)
         updates, opt_state_t = optimizer.update(dloss_dtheta, opt_state)
         online_params_t = optix.apply_updates(online_params, updates)
         return online_params_t, opt_state_t, td_errors
-
-#  class DQNLearning:
-#      @staticmethod
-#      @partial(jax.jit, static_argnums=(0, 1))
-#      def update_q(network, optimizer, online_params, trg_params, opt_state,
-#                   obs_tm1, a_tm1, obs_t, lm_t, r_t, term_t, discount_t):
-#          """Update network weights wrt Q-learning loss.
-#
-#          Args:
-#              network    -- haiku Transformed network.
-#              optimizer  -- optimizer.
-#              net_params -- parameters (weights) of the network.
-#              opt_state  -- state of the optimizer.
-#              q_tm1      -- q-value of state-action at time t-1.
-#              obs_tm1    -- observation at time t-1.
-#              a_tm1      -- action at time t-1.
-#              r_t        -- reward at time t.
-#              term_t     -- terminal state at time t?
-#          """
-#
-#          def q_learning_loss(online_params, trg_params, obs_tm1, a_tm1, obs_t,
-#                               lm_t, r_t, term_t, discount_t):
-#              q_tm1 = network.apply(online_params, obs_tm1)
-#              q_t = network.apply(trg_params, obs_t)
-#              # set q values of illegal actions to a large negative number.
-#              #  q_t = jnp.where(lm_t, q_t, -1e3)
-#              # set q values to zero if the state is terminal, i.e.
-#              #  q_t = jnp.where(jnp.broadcast_to(term_t, q_t.shape), 0.0, q_t)
-#              td_error = jax.vmap(rlax.q_learning, in_axes=(0, 0, 0, None, 0))(
-#                  q_tm1, a_tm1[:, 0], r_t[:, 0], discount_t, q_t)
-#              return rlax.l2_loss(td_error).mean()
-#
-#          dloss_dtheta = jax.grad(q_learning_loss)(online_params, trg_params, obs_tm1, a_tm1, obs_t,
-#                                                   lm_t, r_t, term_t, discount_t)
-#          updates, opt_state_t = optimizer.update(dloss_dtheta, opt_state)
-#          online_params_t = optix.apply_updates(online_params, updates)
-#          return online_params_t, opt_state_t
-#
-#      @staticmethod
-#      @partial(jax.jit, static_argnums=(0, 1))
-#      def update_q_double(network, optimizer, online_params, trg_params, opt_state,
-#                   obs_tm1, a_tm1, obs_t, lm_t, r_t, term_t, discount_t):
-#          """Update network weights wrt Q-learning loss.
-#
-#          Args:
-#              network    -- haiku Transformed network.
-#              optimizer  -- optimizer.
-#              net_params -- parameters (weights) of the network.
-#              opt_state  -- state of the optimizer.
-#              q_tm1      -- q-value of state-action at time t-1.
-#              obs_tm1    -- observation at time t-1.
-#              a_tm1      -- action at time t-1.
-#              r_t        -- reward at time t.
-#              term_t     -- terminal state at time t?
-#          """
-#
-#          def double_q_learning_loss(online_params, trg_params, obs_tm1, a_tm1, obs_t,
-#                               lm_t, r_t, term_t, discount_t):
-#              q_tm1 = network.apply(online_params, obs_tm1)
-#              q_t = network.apply(trg_params, obs_t)
-#              q_sel = network.apply(online_params, obs_t)
-#              # set q values of illegal actions to a larger negative number.
-#              #  q_sel = jnp.where(lm_t, q_sel, -1e2)
-#              #  q_t = jnp.where(lm_t, q_t, -1e2)
-#              # set q values to zero if the state is terminal, i.e.
-#              #  q_t = jnp.where(jnp.broadcast_to(term_t, q_t.shape), 0.0, q_t)
-#              td_error = jax.vmap(rlax.double_q_learning, in_axes=(0, 0, 0, None, 0, 0))(
-#                  q_tm1, a_tm1[:, 0], r_t[:, 0], discount_t, q_t, q_sel)
-#              return rlax.l2_loss(td_error).mean()
-#
-#          dloss_dtheta = jax.grad(double_q_learning_loss)(online_params, trg_params, obs_tm1, a_tm1, obs_t,
-#                                                    lm_t, r_t, term_t, discount_t)
-#          updates, opt_state_t = optimizer.update(dloss_dtheta, opt_state)
-#          online_params_t = optix.apply_updates(online_params, updates)
-#          return online_params_t, opt_state_t
 
 class DQNAgent:
     def __init__(
