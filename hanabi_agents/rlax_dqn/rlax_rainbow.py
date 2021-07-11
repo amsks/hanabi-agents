@@ -528,11 +528,55 @@ class DQNAgent:
         self.requires_vectorized_observation = lambda: True
 
         # vmapped functions for parallel training of n_networks of agents
-        self.parallel_update = jax.vmap(self.update_q, in_axes=(None, None, None, 0, 0, 0, 0, 
-                                                                {"observation_tm1" : 0, "action_tm1" : 0, "reward_t" : 0, "observation_t" : 0, "terminal_t" : 0},
-                                                                None, 0, None, None, None, 0, 0, 0))
-        self.parallel_eval_exploit = jax.vmap(DQNPolicy.eval_policy, in_axes=(None, None, None, 0, 0, 0, 0))
-        self.parallel_eval = jax.vmap(DQNPolicy.policy, in_axes=(None, None, None, None, 0, None, None, 0, 0, 0))
+        self.parallel_update = jax.vmap(
+            self.update_q, 
+            in_axes=(
+                None, 
+                None, 
+                None, 
+                0, 
+                0, 
+                0, 
+                0, 
+                {"observation_tm1" : 0, "action_tm1" : 0, "reward_t" : 0, "observation_t" : 0, "terminal_t" : 0},
+                None, 
+                0, 
+                None, 
+                None, 
+                None, 
+                0, 
+                0, 
+                0,
+                0,
+                0
+            ))
+        
+        self.parallel_eval_exploit = jax.vmap(
+            DQNPolicy.eval_policy, 
+            in_axes=(
+                None, 
+                None, 
+                None, 
+                0, 
+                0, 
+                0, 
+                0
+            ))
+        
+        self.parallel_eval = jax.vmap(
+            DQNPolicy.policy, 
+            in_axes=(
+                None, 
+                None, 
+                None, 
+                None, 
+                0, 
+                None, 
+                None, 
+                0, 
+                0, 
+                0
+            ))
 
 
     def exploit(self, observations, eval = False):
